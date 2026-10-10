@@ -1,0 +1,20 @@
+# Local development only. The domain deployment will keep PostgreSQL private.
+services:
+  db:
+    image: pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_DB: rag
+      POSTGRES_PASSWORD: ${RAG_DEV_DB_PASSWORD:?Set RAG_DEV_DB_PASSWORD in your shell}
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - rag_dev_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  rag_dev_db:
