@@ -1,7 +1,7 @@
 """Only the operations required across external boundaries."""
 
 from pathlib import Path
-from typing import Protocol, Sequence
+from typing import Iterator, Protocol, Sequence
 
 from small_rag.domain.models import Document, Embedding, IndexedChunk, SearchHit
 
@@ -11,6 +11,13 @@ class TextExtractor(Protocol):
     def recipe_id(self) -> str: ...
 
     def extract(self, path: Path, corpus_root: Path) -> Document: ...
+
+
+class CorpusReader(Protocol):
+    @property
+    def recipe_id(self) -> str: ...
+
+    def iter_documents(self, root: Path, max_documents: int) -> Iterator[Document]: ...
 
 
 class Embedder(Protocol):
