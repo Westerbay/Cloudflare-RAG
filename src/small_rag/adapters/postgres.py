@@ -44,6 +44,14 @@ class PostgresChunkIndex:
         self.embedding_model = embedding_model
         self.expected_recipe = expected_recipe
 
+    async def check_ready(self) -> bool:
+        async with await psycopg.AsyncConnection.connect(self.database_url) as conn:
+            row = await (await conn.execute(
+                """SELECT g.embedding_model, g.recipe FROM rag_generations g
+                   JOIN rag_active_generation a ON a.generation_id = g.id"""
+            )).fetchone()
+        return row == (self.embedding_model, self.expected_recipe)
+
     async def publish(self, chunks: Sequence[IndexedChunk], recipe: str) -> None:
         if not chunks:
             raise ValueError("Refusing to activate an empty index")
