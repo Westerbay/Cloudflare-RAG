@@ -30,6 +30,8 @@ class AppSettings(BaseSettings):
     max_chunks: int = Field(10_000, ge=1, le=100_000)
     max_message_chars: int = Field(4000, ge=1, le=20_000)
     max_history_turns: int = Field(8, ge=0, le=20)
+    max_evidence_chars: int = Field(6000, ge=500, le=20_000)
+    max_output_tokens: int = Field(384, ge=64, le=1024)
     provider_timeout_seconds: int = Field(120, ge=1, le=600)
 
     @field_validator("database_url")
