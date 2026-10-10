@@ -4,7 +4,8 @@ The application has two separate paths. **Indexing** prepares searchable evidenc
 
 ```mermaid
 flowchart LR
-  M[Markdown files] --> X[Text extractor port: Markdown adapter]
+  M[Markdown files] --> R[Corpus reader: file registry]
+  R --> X[Text extractor port: Markdown adapter]
   X --> C[Chunks with path, heading and line numbers]
   C --> E[Embedding port: llama.cpp embedding server]
   E --> D[(PostgreSQL + pgvector)]
@@ -21,7 +22,7 @@ flowchart LR
 
 `python -m small_rag.cli migrate` applies versioned SQL migrations. `python -m small_rag.cli index` then walks the configured corpus, extracts Markdown text, divides it into bounded chunks, asks the embedding server for one 1024-number vector per chunk, and stores vectors plus source metadata. The active index generation changes only after the complete rebuild succeeds. A failed rebuild leaves the previous generation available. These are operator commands; API startup and chat requests never index files.
 
-The extractor is behind an application port so a future PDF or plain-text adapter can produce the same extracted-text contract. This release only accepts Markdown. No adapter for other formats is shipped or implied.
+The application depends on two input ports: a corpus reader enumerates documents, and a text extractor converts one source file into extracted text. The file reader dispatches by registered extension; this release registers only `.md` and `.markdown` with the Markdown adapter. To add PDF later, implement a PDF extractor and register `.pdf` in the outer composition layer. The indexing use case, chunker and database port remain unchanged. A new extractor or a changed registration changes the index recipe, so rebuild the index before querying. No adapter for other formats is shipped or implied.
 
 An embedding model maps a text passage to a vector learned during its pretraining and retrieval training. Texts with similar meaning should land near one another in that vector space. The embedding model does **not** answer the question. The same embedding model and indexing recipe must be used for stored chunks and incoming questions; changing them requires a rebuild. Its quality is statistical, so a nearby vector is a candidate passage, not proof that a fact is true.
 
@@ -34,5 +35,7 @@ These guardrails limit the answer path but cannot guarantee factual correctness.
 ## Components and boundaries
 
 `llama.cpp` is a C/C++ inference project and executable suite, not one source file. Its `llama-server` executable loads local GGUF weights and exposes HTTP endpoints. This stack runs separate server containers for embeddings and chat so each model can stay loaded. FastAPI owns the HTTP application; PostgreSQL stores the index; Caddy terminates HTTPS, authenticates callers and proxies requests to FastAPI. Only Caddy has public host ports in the domain profile. See [deployment.md](deployment.md) for the exact network and operating steps.
+
+The `ChunkWriter` and `ChunkSearcher` ports separate the indexing and answering needs. The PostgreSQL adapter implements both. The `Generator` port describes the exact two-prompt call used by the answering use case. FastAPI and the CLI construct concrete adapters at the outer boundary.
 
 The `/v1` prefix reserves room for future incompatible API contracts while keeping the current request and response shape stable. “Retrieval” is the question-time search between question embedding and answer generation. It does not refer to downloading the model or ingesting documents.
