@@ -7,6 +7,9 @@ from small_rag.domain.models import Document, Embedding, IndexedChunk, SearchHit
 
 
 class TextExtractor(Protocol):
+    @property
+    def recipe_id(self) -> str: ...
+
     def extract(self, path: Path, corpus_root: Path) -> Document: ...
 
 
@@ -15,10 +18,12 @@ class Embedder(Protocol):
 
 
 class Generator(Protocol):
-    async def generate(self, prompt: str) -> str: ...
+    async def generate(self, system_prompt: str, user_prompt: str) -> str: ...
 
 
-class ChunkIndex(Protocol):
+class ChunkWriter(Protocol):
     async def publish(self, chunks: Sequence[IndexedChunk], recipe: str) -> None: ...
 
+
+class ChunkSearcher(Protocol):
     async def search(self, query: Embedding, limit: int) -> Sequence[SearchHit]: ...
