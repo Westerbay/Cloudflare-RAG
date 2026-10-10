@@ -9,10 +9,12 @@ description = "A small, explicit RAG for Raspberry Pi"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
   "markdown-it-py>=4.2,<5",
   "psycopg[binary]>=3.2,<4",
   "pydantic-settings>=2.15,<3",
+  "uvicorn>=0.34,<1",
 ]
 
 [project.optional-dependencies]

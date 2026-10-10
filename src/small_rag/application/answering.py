@@ -8,6 +8,10 @@ from small_rag.application.ports import ChunkSearcher, Embedder, Generator
 from small_rag.domain.models import Answer, AnswerStatus, ChatTurn, Citation, SearchHit
 
 
+class InvalidInput(ValueError):
+    """Caller-supplied chat input violates a configured bound."""
+
+
 class AnswerQuestion:
     def __init__(
         self,
@@ -68,12 +72,12 @@ class AnswerQuestion:
 
     async def ask(self, question: str, history: Sequence[ChatTurn] = ()) -> Answer:
         if not question.strip() or len(question) > self.max_message_chars:
-            raise ValueError("Question must be nonempty and within the configured limit")
+            raise InvalidInput("Question must be nonempty and within the configured limit")
         if len(history) > self.max_history_turns:
-            raise ValueError("Chat history exceeds the configured turn limit")
+            raise InvalidInput("Chat history exceeds the configured turn limit")
         if any(turn.role not in {"user", "assistant"} or not turn.content or
                len(turn.content) > self.max_message_chars for turn in history):
-            raise ValueError("Chat history has an invalid role or message length")
+            raise InvalidInput("Chat history has an invalid role or message length")
 
         query = await self.embedder.embed(question)
         hits = await self.index.search(query, self.top_k)
