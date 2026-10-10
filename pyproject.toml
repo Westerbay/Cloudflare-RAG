@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling>=1.32,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "small-rag"
+version = "0.1.0"
+description = "A small, explicit RAG for Raspberry Pi"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic-settings>=2.15,<3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/small_rag"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

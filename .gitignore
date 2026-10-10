@@ -1,0 +1,14 @@
+.planning/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+build/
+dist/
+*.egg-info/
+.env*
+data/
+models/
+*.gguf
