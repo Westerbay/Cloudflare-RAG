@@ -5,7 +5,9 @@ from pathlib import Path
 import pytest
 
 from small_rag.adapters.markdown import MarkdownTextExtractor
+from small_rag.adapters.file_corpus import FileCorpus
 from small_rag.application.chunking import chunk_document
+from small_rag.domain.models import Document, ExtractedBlock
 
 
 def test_extract_and_chunk_preserve_heading_path_lines_and_identity(tmp_path: Path) -> None:
@@ -32,6 +34,41 @@ def test_extract_and_chunk_preserve_heading_path_lines_and_identity(tmp_path: Pa
         ("guide.md", 5, 7),
     ]
     assert chunks == chunk_document(second, size_chars=80, overlap_chars=10)
+
+
+def test_file_corpus_uses_registered_extractor_for_new_format(tmp_path: Path) -> None:
+    (tmp_path / "note.txt").write_text("A fact\n", encoding="utf-8")
+    (tmp_path / "ignored.md").write_text("# Ignored\n", encoding="utf-8")
+
+    class PlainTextExtractor:
+        recipe_id = "plain-text-v1"
+
+        def extract(self, path: Path, root: Path) -> Document:
+            return Document(path.relative_to(root).as_posix(), "test-digest", (
+                ExtractedBlock(path.read_text().strip(), 1, 1, None),
+            ))
+
+    corpus = FileCorpus({".txt": PlainTextExtractor()})
+    assert [document.relative_path for document in corpus.iter_documents(tmp_path, 1)] == ["note.txt"]
+    assert "plain-text-v1" in corpus.recipe_id
+    (tmp_path / "second.txt").write_text("Another fact\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="exceeds 1 documents"):
+        list(corpus.iter_documents(tmp_path, 1))
+
+
+def test_file_corpus_rejects_symlink_outside_root(tmp_path: Path) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    (tmp_path / "escape.txt").symlink_to(outside)
+
+    class PlainTextExtractor:
+        recipe_id = "plain-text-v1"
+
+        def extract(self, path: Path, root: Path) -> Document:
+            return Document(path.name, "test-digest", (ExtractedBlock(path.read_text(), 1, 1, None),))
+
+    with pytest.raises(ValueError, match="outside corpus"):
+        list(FileCorpus({".txt": PlainTextExtractor()}).iter_documents(tmp_path, 1))
 
 
 def test_long_section_stays_bounded_and_overlaps(tmp_path: Path) -> None:
