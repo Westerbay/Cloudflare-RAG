@@ -4,7 +4,7 @@ import json
 import math
 from collections.abc import Sequence
 
-from small_rag.application.ports import ChunkIndex, Embedder, Generator
+from small_rag.application.ports import ChunkSearcher, Embedder, Generator
 from small_rag.domain.models import Answer, AnswerStatus, ChatTurn, Citation, SearchHit
 
 
@@ -23,7 +23,7 @@ class AnswerQuestion:
     def __init__(
         self,
         embedder: Embedder,
-        index: ChunkIndex,
+        index: ChunkSearcher,
         generator: Generator,
         *,
         top_k: int,
