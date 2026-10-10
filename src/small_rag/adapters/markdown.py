@@ -1,12 +1,14 @@
 """Markdown text extraction with source lines and a confined input path."""
 
 import hashlib
+from importlib.metadata import version
 from pathlib import Path
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
 from small_rag.domain.models import Document, ExtractedBlock
+from small_rag.adapters.file_corpus import FileCorpus
 
 
 def _plain_text(token: Token) -> str:
@@ -29,6 +31,10 @@ class MarkdownTextExtractor:
             raise ValueError("max_document_bytes must be positive")
         self.max_document_bytes = max_document_bytes
         self.parser = MarkdownIt("commonmark")
+
+    @property
+    def recipe_id(self) -> str:
+        return f"markdown-it-py-{version('markdown-it-py')}"
 
     def extract(self, path: Path, corpus_root: Path) -> Document:
         root = corpus_root.resolve(strict=True)
@@ -76,3 +82,8 @@ class MarkdownTextExtractor:
             sha256=hashlib.sha256(raw).hexdigest(),
             blocks=tuple(blocks),
         )
+
+
+def markdown_corpus(max_document_bytes: int) -> FileCorpus:
+    extractor = MarkdownTextExtractor(max_document_bytes)
+    return FileCorpus({".md": extractor, ".markdown": extractor})
