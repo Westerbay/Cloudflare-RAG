@@ -1,6 +1,6 @@
 # Disposable local PostgreSQL
 
-This Compose file exposes PostgreSQL only on the loopback address for development. It is separate from the later domain deployment profile, where PostgreSQL will have no host port.
+`compose.db-dev.yml` exposes PostgreSQL only on the loopback address for Python development. The full stack's [local and domain profiles](../docs/deployment.md) are separate; PostgreSQL has no host port in either full-stack profile.
 
 From the repository root, set a private password in your shell and start the service:
 

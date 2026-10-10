@@ -1,6 +1,6 @@
 # Small RAG
 
-A small, explicit retrieval-augmented chatbot intended for a Raspberry Pi 5 with 8 GB of RAM. The project is delivered in stages. Markdown extraction, pgvector indexing, evidence retrieval and the FastAPI boundary are implemented; container deployment follows in a separate pull request.
+A small, explicit retrieval-augmented chatbot intended for a Raspberry Pi 5 with 8 GB of RAM. It uses Markdown, PostgreSQL/pgvector, two llama.cpp servers, FastAPI and optional Caddy HTTPS access. The [architecture guide](docs/architecture.md) explains both RAG phases; the [deployment guide](docs/deployment.md) covers local and domain operation.
 
 ## Boundaries
 
@@ -9,7 +9,8 @@ A small, explicit retrieval-augmented chatbot intended for a Raspberry Pi 5 with
 - `src/small_rag/adapters/` holds Markdown, llama.cpp and PostgreSQL adapters.
 - `src/small_rag/api.py` exposes the HTTP boundary.
 - `database/migrations/` holds versioned SQL migrations.
-- `infra/` holds Docker Compose and, in the next stage, Caddy configuration.
+- `infra/` holds Docker Compose profiles and Caddy configuration.
+- `scripts/` holds explicit model download and target-machine benchmark commands.
 
 The intended flow is Markdown extraction → chunks → embeddings → PostgreSQL/pgvector → retrieval → grounded chat answer with citations. The application never trains a model; an operator supplies local GGUF files outside Git.
 
@@ -49,4 +50,4 @@ curl -sS http://127.0.0.1:8000/v1/chat \
   -d '{"message":"What does the indexed corpus say about the Raspberry Pi?","history":[]}'
 ```
 
-The response has `status` (`answered`, `insufficient_context` or `out_of_scope`), `answer`, and `citations` with relative Markdown paths and source line ranges. The API has no ingestion route. Keep this local server bound to loopback; the later Caddy profile supplies public TLS and authentication.
+The response has `status` (`answered`, `insufficient_context` or `out_of_scope`), `answer`, and `citations` with relative Markdown paths and source line ranges. The API has no ingestion route. Keep this local server bound to loopback; the [Caddy domain profile](docs/deployment.md#domain-profile) supplies public TLS and authentication.
