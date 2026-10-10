@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from small_rag.adapters.llama_chat import LlamaCppGenerator
 from small_rag.adapters.llama_embeddings import LlamaCppEmbedder
+from small_rag.adapters.markdown import markdown_corpus
 from small_rag.adapters.postgres import PostgresChunkIndex
 from small_rag.application.answering import AnswerQuestion, InvalidInput
 from small_rag.application.indexing import index_recipe
@@ -32,9 +33,11 @@ class ChatIn(BaseModel):
 def create_app() -> FastAPI:
     settings = AppSettings()
     database_url = settings.database_url.get_secret_value()
+    corpus = markdown_corpus(settings.max_document_bytes)
     index = PostgresChunkIndex(
         database_url, settings.embedding_model,
-        index_recipe(settings.embedding_model, settings.chunk_size_chars, settings.chunk_overlap_chars),
+        index_recipe(corpus.recipe_id, settings.embedding_model,
+                     settings.chunk_size_chars, settings.chunk_overlap_chars),
     )
     embedder = LlamaCppEmbedder(str(settings.embedding_url), settings.embedding_model, settings.provider_timeout_seconds)
     generator = LlamaCppGenerator(
