@@ -10,6 +10,7 @@ import httpx
 
 from small_rag.adapters.llama_chat import LlamaCppGenerator
 from small_rag.adapters.llama_embeddings import LlamaCppEmbedder
+from small_rag.adapters.markdown import markdown_corpus
 from small_rag.adapters.postgres import PostgresChunkIndex
 from small_rag.application.answering import AnswerQuestion
 from small_rag.application.indexing import index_recipe
@@ -23,7 +24,8 @@ async def measure(question: str) -> dict:
                                   settings.provider_timeout_seconds, settings.max_output_tokens)
     index = PostgresChunkIndex(
         settings.database_url.get_secret_value(), settings.embedding_model,
-        index_recipe(settings.embedding_model, settings.chunk_size_chars, settings.chunk_overlap_chars),
+        index_recipe(markdown_corpus(settings.max_document_bytes).recipe_id,
+                     settings.embedding_model, settings.chunk_size_chars, settings.chunk_overlap_chars),
     )
     answerer = AnswerQuestion(
         embedder, index, generator, top_k=settings.top_k,

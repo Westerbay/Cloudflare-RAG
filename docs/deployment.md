@@ -6,7 +6,7 @@ This guide starts a **new, local** Docker stack. The domain profile can be expos
 
 - Raspberry Pi 5 with 8 GB RAM, 64-bit Linux, Docker Engine and Compose plugin; or another Linux machine for a trial run. Keep enough free disk for models, PostgreSQL data and a backup.
 - A domain you control for the public profile, with DNS and router/firewall access to TCP 80 and 443. UDP 443 is optional for HTTP/3.
-- A small Markdown corpus in `data/corpus/`. Only `.md` is indexed. `models/`, `data/` and `.env*` are ignored by Git.
+- A small Markdown corpus in `data/corpus/`. Only `.md` and `.markdown` are indexed. `models/`, `data/` and `.env*` are ignored by Git.
 - Model and corpus files readable by the API/model containers; the API process runs as UID 10001.
 - Private values supplied by the operator's environment or secret manager: `RAG_DB_PASSWORD`, `RAG_DATABASE_URL`, and for the domain profile `RAG_DOMAIN`, `RAG_BASIC_AUTH_HASH`. Use an alphanumeric database password or URL-encode special characters in `RAG_DATABASE_URL`. The same password must appear in both database settings.
 
@@ -101,3 +101,5 @@ docker compose -p small-rag-restore -f infra/compose.yml exec -T db psql -U rag 
 Restoration replaces data; do not run it against an existing deployment without choosing and verifying the exact target. Keep the same PostgreSQL major version for the first restore exercise. Stop the disposable restore project with `docker compose -p small-rag-restore -f infra/compose.yml down` when finished; keep or remove its volume only after deciding whether its data is needed.
 
 Before an update, save a backup and note the current Git commit and image digests. Pull the new code/images, inspect the migration SQL, build, then run the explicit `migrate` command before `index`. Check `/health/ready` and a cited answer. For rollback, redeploy the recorded code/images and restore the matching database backup when a new migration is incompatible; older code is not guaranteed to read a newer schema. Never use `down --volumes` as an update or rollback command. Validate changes on the local profile before exposing the domain profile.
+
+The index recipe now records the corpus reader and its extractor registration. After updating from a version that used the earlier Markdown-only recipe, `/health/ready` will return 503 until you run the explicit `index` command. Keep the Markdown corpus available for that rebuild; no database migration is needed for the recipe change itself.
