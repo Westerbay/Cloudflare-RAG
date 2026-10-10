@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from small_rag.adapters.postgres import migrate
 from small_rag.api import create_app
 from small_rag.cli import _run
+from scripts.benchmark_core import measure
 
 
 DATABASE_URL = os.getenv("RAG_TEST_DATABASE_URL")
@@ -39,6 +40,17 @@ class FakeModel(BaseHTTPRequestHandler):
             evidence = prompt["evidence"][0]
             answer = {"status": "answered", "answer": evidence["text"], "citations": [evidence["id"]]}
             self._send(200, {"choices": [{"message": {"content": json.dumps(answer)}}]})
+        elif self.path == "/completion":
+            events = [
+                {"content": "Hello", "stop": False},
+                {"content": "", "stop": True, "timings": {"predicted_per_second": 12.5}},
+            ]
+            content = "".join(f"data: {json.dumps(event)}\n\n" for event in events).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
         else:
             self._send(404, {})
 
@@ -82,6 +94,11 @@ def test_chat_and_readiness_with_disposable_postgres(monkeypatch: pytest.MonkeyP
     try:
         asyncio.run(migrate(DATABASE_URL, Path("database/migrations")))
         asyncio.run(_run("index"))
+        benchmark = asyncio.run(measure("How much RAM does the Pi have?"))
+        assert benchmark["answer_status"] == "answered"
+        assert benchmark["retrieved_hits"] >= 1
+        assert benchmark["generation_sample_first_token_ms"] is not None
+        assert benchmark["generation_tokens_per_second"] == 12.5
         with TestClient(create_app()) as client:
             assert client.get("/health/ready").json() == {"status": "ok"}
             response = client.post("/v1/chat", json={"message": "How much RAM does the Pi have?"})

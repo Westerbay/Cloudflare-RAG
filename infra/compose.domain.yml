@@ -1,0 +1,27 @@
+services:
+  caddy:
+    image: caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb
+    environment:
+      RAG_DOMAIN: ${RAG_DOMAIN:?Set the public domain name}
+      RAG_BASIC_AUTH_HASH: ${RAG_BASIC_AUTH_HASH:?Set a Caddy password hash}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    networks:
+      - rag_private
+      - rag_edge
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  rag_edge: {}
