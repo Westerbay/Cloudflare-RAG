@@ -16,11 +16,13 @@ DATABASE_URL = os.getenv("RAG_TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="No disposable test database configured")
 
 
-def _item(chunk_id: str, value: float) -> IndexedChunk:
+def _item(chunk_id: str, value: float, ordinal: int = 0, axis: int = 0) -> IndexedChunk:
+    vector = [0.0] * 1024
+    vector[axis] = value
     return IndexedChunk(
-        chunk=Chunk(chunk_id=chunk_id, document_path="test.md", ordinal=0,
+        chunk=Chunk(chunk_id=chunk_id, document_path="test.md", ordinal=ordinal,
                     heading="Test", line_start=1, line_end=1, text="Test passage"),
-        embedding=(value,) + (0.0,) * 1023,
+        embedding=tuple(vector),
     )
 
 
@@ -65,9 +67,11 @@ def test_migration_and_generation_switch_are_atomic() -> None:
         assert after == before
 
         second_id = str(uuid4())
-        await index.publish([_item(second_id, 2.0)], "recipe-b")
+        orthogonal_id = str(uuid4())
+        await index.publish([_item(second_id, 2.0), _item(orthogonal_id, 1.0, ordinal=1, axis=1)], "recipe-b")
         hits = await index.search((1.0,) + (0.0,) * 1023, 2)
-        assert [hit.chunk.chunk_id for hit in hits] == [second_id]
+        assert [hit.chunk.chunk_id for hit in hits] == [second_id, orthogonal_id]
+        assert hits[0].score > hits[1].score
         with pytest.raises(RuntimeError, match="rebuild"):
             await PostgresChunkIndex(DATABASE_URL, "test-embedding-model", "recipe-c").search(
                 (1.0,) + (0.0,) * 1023, 2

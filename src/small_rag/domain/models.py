@@ -65,6 +65,12 @@ class AnswerStatus(StrEnum):
 
 
 @dataclass(frozen=True)
+class ChatTurn:
+    role: str
+    content: str
+
+
+@dataclass(frozen=True)
 class Answer:
     status: AnswerStatus
     text: str
