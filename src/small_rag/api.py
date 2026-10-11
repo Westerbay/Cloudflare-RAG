@@ -12,6 +12,7 @@ from small_rag.adapters.llama_chat import LlamaCppGenerator
 from small_rag.adapters.llama_embeddings import LlamaCppEmbedder
 from small_rag.adapters.markdown import markdown_corpus
 from small_rag.adapters.postgres import PostgresChunkIndex
+from small_rag.adapters.prompt_files import load_system_prompt
 from small_rag.application.answering import AnswerQuestion, InvalidInput
 from small_rag.application.indexing import index_recipe
 from small_rag.config import AppSettings
@@ -44,12 +45,14 @@ def create_app() -> FastAPI:
         str(settings.chat_url), settings.chat_model,
         settings.provider_timeout_seconds, settings.max_output_tokens,
     )
+    system_prompt = load_system_prompt(settings.system_prompt_path, settings.soul_path)
     answerer = AnswerQuestion(
         embedder, index, generator, top_k=settings.top_k,
         min_similarity=settings.min_similarity,
         max_evidence_chars=settings.max_evidence_chars,
         max_message_chars=settings.max_message_chars,
         max_history_turns=settings.max_history_turns,
+        system_prompt=system_prompt,
     )
 
     @asynccontextmanager

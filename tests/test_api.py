@@ -19,6 +19,8 @@ DATABASE_URL = os.getenv("RAG_TEST_DATABASE_URL")
 
 
 class FakeModel(BaseHTTPRequestHandler):
+    system_prompts: list[str] = []
+
     def log_message(self, format: str, *args: object) -> None:
         pass
 
@@ -32,6 +34,7 @@ class FakeModel(BaseHTTPRequestHandler):
             vector = [1.0] + [0.0] * 1023
             self._send(200, {"data": [{"embedding": vector}]})
         elif self.path == "/v1/chat/completions":
+            self.system_prompts.append(payload["messages"][0]["content"])
             prompt = json.loads(payload["messages"][1]["content"])
             evidence = prompt["evidence"][0]
             answer = {"status": "answered", "answer": evidence["text"], "citations": [evidence["id"]]}
@@ -59,16 +62,23 @@ def test_live_and_bad_input_without_backends(monkeypatch: pytest.MonkeyPatch) ->
 
 @pytest.mark.skipif(not DATABASE_URL, reason="No disposable test database configured")
 def test_chat_and_readiness_with_disposable_postgres(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    FakeModel.system_prompts.clear()
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeModel)
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     corpus = tmp_path / "corpus"
     corpus.mkdir()
     (corpus / "pi.md").write_text("# Pi\n\nThe Pi has 8 GB of RAM.\n", encoding="utf-8")
+    system = tmp_path / "system.md"
+    soul = tmp_path / "SOUL.md"
+    system.write_text("Answer only from evidence.", encoding="utf-8")
+    soul.write_text("Be short and kind.", encoding="utf-8")
     monkeypatch.setenv("RAG_DATABASE_URL", DATABASE_URL)
     monkeypatch.setenv("RAG_CORPUS_ROOT", str(corpus))
     monkeypatch.setenv("RAG_EMBEDDING_URL", f"http://127.0.0.1:{server.server_port}")
     monkeypatch.setenv("RAG_CHAT_URL", f"http://127.0.0.1:{server.server_port}")
+    monkeypatch.setenv("RAG_SYSTEM_PROMPT_PATH", str(system))
+    monkeypatch.setenv("RAG_SOUL_PATH", str(soul))
     try:
         asyncio.run(migrate(DATABASE_URL, Path("database/migrations")))
         asyncio.run(_run("index"))
@@ -81,6 +91,7 @@ def test_chat_and_readiness_with_disposable_postgres(monkeypatch: pytest.MonkeyP
             assert "8 GB" in body["answer"]
             assert body["citations"][0]["path"] == "pi.md"
             assert body["citations"][0]["line_start"] >= 1
+            assert FakeModel.system_prompts[-1] == "Answer only from evidence.\n\nBe short and kind."
         monkeypatch.setenv("RAG_EMBEDDING_MODEL", "incompatible-test-model")
         with TestClient(create_app()) as client:
             assert client.get("/health/ready").status_code == 503
