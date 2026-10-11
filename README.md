@@ -8,6 +8,7 @@ A small, explicit retrieval-augmented chatbot intended for a Raspberry Pi 5 with
 - `src/small_rag/application/` holds ports and use cases.
 - `src/small_rag/adapters/` holds Markdown, llama.cpp and PostgreSQL adapters.
 - `src/small_rag/api.py` exposes the HTTP boundary.
+- `prompts/` holds the editable mission contract and assistant voice.
 - `database/migrations/` holds versioned SQL migrations.
 - `infra/` holds Docker Compose profiles and Caddy configuration.
 - `scripts/` holds explicit model download and target-machine benchmark commands.
@@ -51,3 +52,5 @@ curl -sS http://127.0.0.1:8000/v1/chat \
 ```
 
 The response has `status` (`answered`, `insufficient_context` or `out_of_scope`), `answer`, and `citations` with relative Markdown paths and source line ranges. The API has no ingestion route. Keep this local server bound to loopback; the [Caddy domain profile](docs/deployment.md#domain-profile) supplies public TLS and authentication.
+
+Edit `prompts/system.md` for the mission and `prompts/SOUL.md` for tone. The API loads both at startup; `RAG_SYSTEM_PROMPT_PATH` and `RAG_SOUL_PATH` can point to other UTF-8 files. Restart the API after edits. Prompt changes do not require reindexing.

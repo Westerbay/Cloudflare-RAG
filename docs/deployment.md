@@ -8,6 +8,7 @@ This guide starts a **new, local** Docker stack. The domain profile can be expos
 - A domain you control for the public profile, with DNS and router/firewall access to TCP 80 and 443. UDP 443 is optional for HTTP/3.
 - A small Markdown corpus in `data/corpus/`. Only `.md` and `.markdown` are indexed. `models/`, `data/` and `.env*` are ignored by Git.
 - Model and corpus files readable by the API/model containers; the API process runs as UID 10001.
+- Editable UTF-8 prompt files in `prompts/system.md` (mission and JSON response contract) and `prompts/SOUL.md` (voice and style). They are mounted read-only into the API container.
 - Private values supplied by the operator's environment or secret manager: `RAG_DB_PASSWORD`, `RAG_DATABASE_URL`, and for the domain profile `RAG_DOMAIN`, `RAG_BASIC_AUTH_HASH`. Use an alphanumeric database password or URL-encode special characters in `RAG_DATABASE_URL`. The same password must appear in both database settings.
 
 Docker images are pinned to multi-architecture digests in `infra/compose.yml` and `infra/compose.domain.yml`. The chat default is Qwen3.5 2B Q4_K_M; an explicit 0.8B Q4_0 profile is available if the 2B model is too slow or large. The embedding model is Qwen3-Embedding 0.6B Q8_0. Their exact revisions and SHA-256 digests are pinned in `scripts/download_models.py`. The 2B GGUF is published by Unsloth; verify its license and intended use before distributing weights. Weights are never committed. The download script checks the full file hash and rejects an existing mismatched or partial file. It needs network access only when you run it.
@@ -46,6 +47,8 @@ curl -sS http://127.0.0.1:8000/v1/chat -H 'Content-Type: application/json' -d '{
 ```
 
 Index only after placing Markdown in `data/corpus/` and waiting for both model servers to load. A temporary 503 from `/health/ready` during model startup is expected. `docker compose ... logs chat embeddings api` shows load or provider errors. `docker compose ... ps` should show only `127.0.0.1:8000` as a host binding; database and model services have no host ports. The local profile is for the host machine, not a public router.
+
+To change the assistant's tone, edit `prompts/SOUL.md` and restart the API container with `docker compose -f infra/compose.yml -f infra/compose.local.yml restart api` (use the domain profile file when applicable). The files are loaded at API startup, so editing alone does not affect running requests. The mission and output contract live in `prompts/system.md`; the application still validates statuses and citations, but changing that contract can cause 503 responses when the model emits invalid JSON. Prompt edits do not require rebuilding the image or reindexing documents.
 
 ## Domain profile
 
