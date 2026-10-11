@@ -4,6 +4,7 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
 COPY database/ ./database/
+COPY prompts/ ./prompts/
 COPY scripts/ ./scripts/
 RUN pip install --no-cache-dir . && useradd --system --uid 10001 rag
 USER rag
