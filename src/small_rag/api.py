@@ -33,6 +33,7 @@ class ChatIn(BaseModel):
 
 def create_app() -> FastAPI:
     settings = AppSettings()
+    system_prompt = load_system_prompt(settings.system_prompt_path, settings.soul_path)
     database_url = settings.database_url.get_secret_value()
     corpus = markdown_corpus(settings.max_document_bytes)
     index = PostgresChunkIndex(
@@ -45,7 +46,6 @@ def create_app() -> FastAPI:
         str(settings.chat_url), settings.chat_model,
         settings.provider_timeout_seconds, settings.max_output_tokens,
     )
-    system_prompt = load_system_prompt(settings.system_prompt_path, settings.soul_path)
     answerer = AnswerQuestion(
         embedder, index, generator, top_k=settings.top_k,
         min_similarity=settings.min_similarity,
