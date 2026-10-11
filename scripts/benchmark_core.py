@@ -20,6 +20,7 @@ from small_rag.config import AppSettings
 
 async def measure(question: str) -> dict:
     settings = AppSettings()
+    system_prompt = load_system_prompt(settings.system_prompt_path, settings.soul_path)
     embedder = LlamaCppEmbedder(str(settings.embedding_url), settings.embedding_model, settings.provider_timeout_seconds)
     generator = LlamaCppGenerator(str(settings.chat_url), settings.chat_model,
                                   settings.provider_timeout_seconds, settings.max_output_tokens)
@@ -32,7 +33,7 @@ async def measure(question: str) -> dict:
         embedder, index, generator, top_k=settings.top_k,
         min_similarity=settings.min_similarity, max_evidence_chars=settings.max_evidence_chars,
         max_message_chars=settings.max_message_chars, max_history_turns=settings.max_history_turns,
-        system_prompt=load_system_prompt(settings.system_prompt_path, settings.soul_path),
+        system_prompt=system_prompt,
     )
     try:
         started = perf_counter()
