@@ -42,8 +42,8 @@ services:
       RAG_EMBEDDING_URL: http://embeddings:8080
       RAG_CHAT_MODEL: ${RAG_CHAT_MODEL:-qwen3.5-2b}
       RAG_EMBEDDING_MODEL: qwen3-embedding-0.6b
-      RAG_SYSTEM_PROMPT_PATH: /app/prompts/system.md
-      RAG_SOUL_PATH: /app/prompts/SOUL.md
+      RAG_SYSTEM_PROMPT_PATH: ${RAG_SYSTEM_PROMPT_PATH:-/app/prompts/system.md}
+      RAG_SOUL_PATH: ${RAG_SOUL_PATH:-/app/prompts/SOUL.md}
     volumes:
       - ../data/corpus:/app/data/corpus:ro
       - ../prompts:/app/prompts:ro
