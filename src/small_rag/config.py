@@ -17,6 +17,8 @@ class AppSettings(BaseSettings):
 
     database_url: SecretStr
     corpus_root: Path = Path("data/corpus")
+    system_prompt_path: Path = Path("prompts/system.md")
+    soul_path: Path = Path("prompts/SOUL.md")
     chat_url: AnyHttpUrl = "http://127.0.0.1:8081"
     embedding_url: AnyHttpUrl = "http://127.0.0.1:8082"
     chat_model: str = Field("qwen3.5-2b", min_length=1)
