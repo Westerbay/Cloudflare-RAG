@@ -1,29 +1,22 @@
-# Disposable local PostgreSQL
+# Cloudflare infrastructure
 
-`compose.db-dev.yml` exposes PostgreSQL only on the loopback address for Python development. The full stack's [local and domain profiles](../docs/deployment.md) are separate; PostgreSQL has no host port in either full-stack profile.
+Use **Wrangler** for this single-provider deployment. Pulumi is not required: there is no additional infrastructure state backend, subscription or provider plugin to maintain.
 
-From the repository root, set a private password in your shell and start the service:
+- `wrangler.jsonc`: portable Worker, AI, D1 and Vectorize bindings with non-secret settings.
+- `setup.mjs`: repeatable account-scoped D1/Vectorize setup; defaults to a plan, requires `--apply` for remote writes.
+- `wrangler.local.json`: ignored generated account and resource IDs, written only after successful setup.
+- `wrangler.mjs`: invokes the locked local Wrangler with the correct configuration and blocks unconfigured remote commands.
+- `migrations/`: versioned D1 SQL migrations.
 
-```sh
-export RAG_DEV_DB_PASSWORD='choose-a-unique-local-password'
-docker compose -p small-rag-dev -f infra/compose.db-dev.yml up -d
-export RAG_DATABASE_URL="postgresql://rag:${RAG_DEV_DB_PASSWORD}@127.0.0.1:15432/rag"
-.venv/bin/python -m small_rag.cli migrate
-```
-
-With a llama.cpp embedding server running at `RAG_EMBEDDING_URL` and Markdown files under `RAG_CORPUS_ROOT`, build a complete generation explicitly:
+From the repository root:
 
 ```sh
-export RAG_CORPUS_ROOT=examples/corpus
-export RAG_EMBEDDING_URL=http://127.0.0.1:8082
-.venv/bin/python -m small_rag.cli index
+npm run infra:setup
+# After selecting a Free account and supplying operator credentials:
+npm run infra:setup -- --apply
+npm run db:migrate:remote
 ```
 
-The model server must be started with embedding mode and return 1024-dimensional nonzero vectors. Indexing is never triggered by an API request. Inspect the schema and active generation with:
+Ingestion, deployment and secret entry are explicit separate operations. See the [deployment guide](../docs/deployment.md). Setup never upgrades billing, deletes an index, resets a database or writes a secret. Inspect existing `small-rag` resource names before applying to an account; incompatible vector settings fail instead of replacing resources.
 
-```sh
-docker compose -p small-rag-dev -f infra/compose.db-dev.yml exec db psql -U rag -d rag -c '\dx vector'
-docker compose -p small-rag-dev -f infra/compose.db-dev.yml exec db psql -U rag -d rag -c 'SELECT g.id, g.embedding_model, g.recipe, count(c.chunk_id) AS chunks FROM rag_active_generation a JOIN rag_generations g ON g.id = a.generation_id LEFT JOIN rag_chunks c ON c.generation_id = g.id GROUP BY g.id;'
-```
-
-`docker compose -p small-rag-dev -f infra/compose.db-dev.yml down` stops this local service while retaining its named volume. Back up any wanted data before deliberately removing the volume.
+The `compose*.yml` files and `Caddyfile` are the **legacy local Python/PostgreSQL/llama.cpp stack**. They are retained to preserve earlier work and benchmarks, and are not used by the Cloudflare deployment. See [legacy-deployment.md](../docs/legacy-deployment.md) for that historical path. Do not use its Docker commands to configure the Worker.

@@ -98,11 +98,13 @@ class AnswerQuestion:
         if not selected:
             return await self._refuse(question, history, AnswerStatus.INSUFFICIENT_CONTEXT)
 
+        # Request-local aliases avoid asking the model to generate long hash IDs.
+        chosen = {f"s{position}": hit.chunk for position, (hit, _) in enumerate(selected, start=1)}
         evidence = [
-            {"id": hit.chunk.chunk_id, "path": hit.chunk.document_path,
-             "lines": [hit.chunk.line_start, hit.chunk.line_end],
-             "heading": hit.chunk.heading, "text": content}
-            for hit, content in selected
+            {"id": source_id, "path": chunk.document_path,
+             "lines": [chunk.line_start, chunk.line_end],
+             "heading": chunk.heading, "text": content}
+            for (source_id, chunk), (_, content) in zip(chosen.items(), selected)
         ]
         result = await self._generate(question, history, evidence)
         status = result.get("status")
@@ -119,12 +121,11 @@ class AnswerQuestion:
             return await self._refuse(question, history, AnswerStatus.INSUFFICIENT_CONTEXT)
         if not isinstance(citation_ids, list) or not citation_ids:
             return await self._refuse(question, history, AnswerStatus.INSUFFICIENT_CONTEXT)
-        chosen = {hit.chunk.chunk_id: hit.chunk for hit, _ in selected}
         if any(not isinstance(item, str) or item not in chosen for item in citation_ids):
             return await self._refuse(question, history, AnswerStatus.INSUFFICIENT_CONTEXT)
         citations = tuple(
-            Citation(chunk_id=chunk_id, document_path=chosen[chunk_id].document_path,
-                     line_start=chosen[chunk_id].line_start, line_end=chosen[chunk_id].line_end)
-            for chunk_id in dict.fromkeys(citation_ids)
+            Citation(chunk_id=chosen[source_id].chunk_id, document_path=chosen[source_id].document_path,
+                     line_start=chosen[source_id].line_start, line_end=chosen[source_id].line_end)
+            for source_id in dict.fromkeys(citation_ids)
         )
         return Answer(AnswerStatus.ANSWERED, answer_text.strip(), citations)

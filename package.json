@@ -1,0 +1,27 @@
+{
+  "name": "small-rag",
+  "version": "0.2.0",
+  "private": true,
+  "description": "A source-grounded Markdown chatbot on Cloudflare Workers AI, D1 and Vectorize",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node infra/wrangler.mjs dev",
+    "test": "node --test worker/tests/*.test.*",
+    "check": "tsc --noEmit",
+    "build": "node infra/wrangler.mjs deploy --dry-run --outdir ../dist/worker",
+    "infra:setup": "node infra/setup.mjs",
+    "db:migrate:local": "node infra/wrangler.mjs d1 migrations apply DB --local",
+    "db:migrate:remote": "node infra/wrangler.mjs d1 migrations apply DB --remote",
+    "corpus:export": "node scripts/index-cloudflare.mjs --export-only",
+    "corpus:index": "node scripts/index-cloudflare.mjs",
+    "deploy": "node infra/wrangler.mjs deploy"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2",
+    "wrangler": "4.151.0"
+  }
+}

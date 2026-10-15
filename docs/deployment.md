@@ -1,108 +1,110 @@
-# Deploy and operate the stack
+# Deploy Small RAG to Cloudflare
 
-This guide starts a **new, local** Docker stack. The domain profile can be exposed through your own DNS and router after validation. No hosted service or Raspberry Pi performance is claimed here.
+The target is Cloudflare Workers Free, Workers AI, D1 and Vectorize. There is no VM, GPU rental, Container subscription or PostgreSQL server. `workers.dev` supplies an HTTPS address without purchasing a domain. These instructions create remote state only when you run the explicitly marked remote commands.
 
-## Requirements and files
+## Prerequisites
 
-- Raspberry Pi 5 with 8 GB RAM, 64-bit Linux, Docker Engine and Compose plugin; or another Linux machine for a trial run. Keep enough free disk for models, PostgreSQL data and a backup.
-- A domain you control for the public profile, with DNS and router/firewall access to TCP 80 and 443. UDP 443 is optional for HTTP/3.
-- A small Markdown corpus in `data/corpus/`. Only `.md` and `.markdown` are indexed. `models/`, `data/` and `.env*` are ignored by Git.
-- Model and corpus files readable by the API/model containers; the API process runs as UID 10001.
-- Editable UTF-8 prompt files in `prompts/system.md` (mission and JSON response contract) and `prompts/SOUL.md` (voice and style). They are mounted read-only into the API container.
-- Private values supplied by the operator's environment or secret manager: `RAG_DB_PASSWORD`, `RAG_DATABASE_URL`, and for the domain profile `RAG_DOMAIN`, `RAG_BASIC_AUTH_HASH`. Use an alphanumeric database password or URL-encode special characters in `RAG_DATABASE_URL`. The same password must appear in both database settings.
-
-Docker images are pinned to multi-architecture digests in `infra/compose.yml` and `infra/compose.domain.yml`. The chat default is Qwen3.5 2B Q4_K_M; an explicit 0.8B Q4_0 profile is available if the 2B model is too slow or large. The embedding model is Qwen3-Embedding 0.6B Q8_0. Their exact revisions and SHA-256 digests are pinned in `scripts/download_models.py`. The 2B GGUF is published by Unsloth; verify its license and intended use before distributing weights. Weights are never committed. The download script checks the full file hash and rejects an existing mismatched or partial file. It needs network access only when you run it.
-
-From the repository root:
+Use Node.js 24+ and Python 3.11+ for offline corpus preparation. Install the locked Node dependencies and the existing Python tools:
 
 ```sh
-mkdir -p models data/corpus
-python3 scripts/download_models.py --chat 2b
-# Or download the smaller chat profile:
-# python3 scripts/download_models.py --chat 0.8b
+npm ci
+python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[dev]'
+npm test
+npm run check
+npm run build
 ```
 
-For the smaller model, also set `RAG_CHAT_GGUF_FILE=Qwen3.5-0.8B-Q4_0.gguf` and `RAG_CHAT_MODEL=qwen3.5-0.8b` in the same operator environment before running Compose. The alias must match the API's configured chat model. Switching the chat model does not require reindexing; switching the embedding model or chunk settings does.
+Tests use SQLite and fake AI/Vectorize bindings; the build is Wrangler's deployment dry run. None of these steps provisions Cloudflare resources or calls hosted inference. Wrangler is installed locally through `package-lock.json`; no global installation, Pulumi account or infrastructure state service is required.
 
-## Private configuration
+## Operator credentials
 
-Set a unique database password in your shell or secret manager, then construct the matching URL. The following interactive shell example avoids writing the password to a tracked file or command history:
+Create a Cloudflare account and keep its Workers plan on **Free**. Obtain the account ID and an API token scoped to that account with **D1 Edit**, **Vectorize Write** and **Workers AI Read** permissions for resource setup and ingestion. Wrangler deployment and Worker-secret management additionally need **Workers Scripts Edit** (and the account read permissions required by Wrangler); alternatively authenticate Wrangler separately with its interactive `login` command. Use a scoped API token rather than a Global API Key. Permission names and availability should be checked in the current Cloudflare dashboard.
+
+Supply public identifiers and secrets in your shell or secret manager. This interactive example keeps the token out of the typed command history:
 
 ```sh
-export RAG_DB_PASSWORD="$(python3 -c 'import getpass; print(getpass.getpass("Database password: "))')"
-export RAG_DATABASE_URL="postgresql://rag:${RAG_DB_PASSWORD}@db:5432/rag"
+export CLOUDFLARE_ACCOUNT_ID='YOUR_32_CHARACTER_ACCOUNT_ID'
+export CLOUDFLARE_API_TOKEN="$(python3 -c 'import getpass; print(getpass.getpass("Cloudflare API token: "))')"
 ```
 
-Use a password without URI special characters for this example. For a permanent service, provide these environment variables securely to the Compose process. Do not commit credentials, a real `.env` file, model weights or a database backup.
+Never paste the token into a chat, commit it, or put it in Wrangler `vars`. The scripts do not read secret files or print provider error bodies. The deployed Worker uses its AI/D1/Vectorize bindings and does not need this operator API token.
 
-## Local profile first
+## Infrastructure setup
+
+Inspect the local plan:
 
 ```sh
-docker compose -f infra/compose.yml -f infra/compose.local.yml config --quiet
-docker compose -f infra/compose.yml -f infra/compose.local.yml up -d --build
-docker compose -f infra/compose.yml -f infra/compose.local.yml exec -T api python -m small_rag.cli migrate
-docker compose -f infra/compose.yml -f infra/compose.local.yml exec -T api python -m small_rag.cli index
-curl -fsS http://127.0.0.1:8000/health/ready
-curl -sS http://127.0.0.1:8000/v1/chat -H 'Content-Type: application/json' -d '{"message":"What does the corpus say about the Raspberry Pi?","history":[]}'
+npm run infra:setup
 ```
 
-Index only after placing Markdown in `data/corpus/` and waiting for both model servers to load. A temporary 503 from `/health/ready` during model startup is expected. `docker compose ... logs chat embeddings api` shows load or provider errors. `docker compose ... ps` should show only `127.0.0.1:8000` as a host binding; database and model services have no host ports. The local profile is for the host machine, not a public router.
-
-To change the assistant's tone, edit `prompts/SOUL.md` and restart the API container with `docker compose -f infra/compose.yml -f infra/compose.local.yml restart api` (use the domain profile file when applicable). The files are loaded at API startup, so editing alone does not affect running requests. You may point `RAG_SYSTEM_PROMPT_PATH` and `RAG_SOUL_PATH` to other files within the mounted `/app/prompts/` directory; recreate the API container after changing either environment variable. The mission and output contract live in `prompts/system.md`; the application still validates statuses and citations, but changing that contract can cause 503 responses when the model emits invalid JSON. Prompt edits do not require rebuilding the image or reindexing documents.
-
-## Domain profile
-
-Point an `A` record for your chosen name to your public IPv4 address. Add an `AAAA` record only if inbound IPv6 works. Forward TCP 80 and 443 from the router to the Pi, and allow them in its firewall. If the ISP uses carrier-grade NAT, ordinary port forwarding will not work; use an authorized tunnel or a public reverse proxy instead. Caddy needs the name reachable to obtain and renew its HTTPS certificate.
-
-Create a password hash interactively with the pinned Caddy image; the command prompts for the plaintext without placing it in the command line:
+Then explicitly apply it to the selected account:
 
 ```sh
-docker run --rm -it caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb caddy hash-password
+npm run infra:setup -- --apply
+npm run db:migrate:remote
 ```
 
-Supply the resulting hash through a private environment/secret manager as `RAG_BASIC_AUTH_HASH`, and set `RAG_DOMAIN` to a hostname such as `rag.example.com` (no scheme or path). The Basic Auth username is `rag`; use a unique, strong password. Every route, including health endpoints, is protected by this Caddy rule. Basic Auth is appropriate for a small personal deployment; add rate limits or stronger identity controls before allowing many users. For a domain stack, do not combine `compose.local.yml` with `compose.domain.yml`:
+The setup script reuses a D1 database named `small-rag`, or creates it when absent. It similarly reuses or creates the `small-rag` Vectorize index with **1024 dimensions and cosine distance**. An incompatible existing vector index is an error; it is not replaced or deleted. Use a dedicated account/resource naming convention and inspect existing names before the first apply. On a partial failure, rerun setup to reuse resources already created.
+
+Generated account and database identifiers go into ignored `infra/wrangler.local.json`. Keep a private operational copy if desired; it contains identifiers, not API tokens or the HTTP password. `infra/wrangler.jsonc` remains the portable source template. `infra/wrangler.mjs` chooses the generated file for subsequent commands and refuses remote operations while IDs are unconfigured. Setup does not apply migrations, deploy, create secrets, subscribe to a plan or enable billing.
+
+D1 schema changes live in `infra/migrations/`. `npm run db:migrate:local` uses only the local Wrangler database; `npm run db:migrate:remote` changes the configured Cloudflare D1 database. Do not point that configuration at a shared or production database without reviewing the exact target and migration.
+
+## Index and deploy
+
+Preview the example corpus and then publish it:
 
 ```sh
-docker compose -f infra/compose.yml -f infra/compose.domain.yml config --quiet
-docker compose -f infra/compose.yml -f infra/compose.domain.yml up -d --build
-docker compose -f infra/compose.yml -f infra/compose.domain.yml exec -T api python -m small_rag.cli migrate
-docker compose -f infra/compose.yml -f infra/compose.domain.yml exec -T api python -m small_rag.cli index
-curl -u rag https://rag.example.com/health/ready
+RAG_PYTHON=.venv/bin/python npm run corpus:index
+RAG_PYTHON=.venv/bin/python npm run corpus:index -- --apply
+npm run deploy
+node infra/wrangler.mjs secret put BASIC_AUTH_PASSWORD
 ```
 
-Replace the example hostname. `curl -u rag` prompts for the password. Verify `docker compose ... ps`: only Caddy should publish `0.0.0.0:80`, `0.0.0.0:443` and UDP 443. The API, model servers and database remain on the private Compose network. Caddy stores certificates in `caddy_data`; retain this volume across restarts and updates. The service has no application-level users or per-user document permissions: anyone with the Basic Auth credential can query the entire indexed corpus. Do not index private documents unless that access model is acceptable.
+Choose a strong Basic Auth password of at least 16 characters when prompted; the username is `rag`. Until the secret is configured, every route returns 503. Configure the secret only through Wrangler or the Cloudflare dashboard, not as a committed plain-text variable. All password holders can query the whole corpus. There is no public ingestion route or per-document authorization.
 
-## Benchmark on the target machine
+For your own Markdown files, use `--corpus data/corpus` with the indexing command. The default is `examples/corpus`. The exporter confines paths to the chosen corpus, rejects oversized documents and limits input to 100 documents and 1000 chunks. Preview commands do not send source text anywhere. `--apply` sends passages to Workers AI, D1 and Vectorize; the Cloudflare account is the processing destination.
 
-Run this **on the Pi** after indexing and after the models are warm. The question must be supported by the corpus:
+Ingestion is generation-based: a failure leaves the old active index available. It does not delete old or failed generations. Run only one ingestion job per index at a time. Each generation needs additional stored vector dimensions; the script checks this index's current vector count before staging, and refuses to exceed five million stored dimensions. Other indexes also share the account's allowance and must be considered separately. Do not repeatedly rebuild large corpora without checking retained versions and the dashboard. Cleanup or replacing an index is a separate, explicitly reviewed operation.
+
+Wrangler prints the deployed URL. Replace the placeholder below:
 
 ```sh
-python3 scripts/benchmark_stack.py --profile local --question 'What does the corpus say about the Raspberry Pi?'
-# Use --profile domain for that Compose profile.
+curl -u rag https://small-rag.YOUR-SUBDOMAIN.workers.dev/health/ready
+curl -u rag https://small-rag.YOUR-SUBDOMAIN.workers.dev/v1/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"What does the corpus say about the Raspberry Pi?","history":[]}'
 ```
 
-The JSON records question embedding time, exact vector search time, total retrieval time, end-to-end answer time/status, retrieved-hit count and a separate llama.cpp `/completion` sample's first-token time, total time and tokens/second. The first-token figure is for that short sample, not the full RAG answer. It also reports host architecture and each container's PID 1 resident memory. This is one sample, not a capacity guarantee; repeat with representative questions and record the Pi's OS, corpus size and model profile. PostgreSQL worker processes and Linux page cache are excluded from the PID 1 RSS figures. Compare both chat profiles only after switching the model and restarting the stack. A benchmark on a laptop does not establish Pi latency or memory use.
+The password is prompted. Readiness checks the D1 active generation and embedding model and the Vectorize dimensions, without consuming inference. Cosine configuration is checked at setup. Readiness does not verify hosted-model availability or remaining AI quota: a later chat can still enter sleep if Cloudflare is unavailable, out of capacity or out of free allocation. Readiness returns the same cached sleep response once a binding failure has been observed; liveness stays available.
 
-## Data safety, updates and recovery
+## Free-tier boundaries
 
-The PostgreSQL volume is `rag_db`; the Caddy domain volumes are `caddy_data` and `caddy_config`. Use `docker compose ... down` without `--volumes` to stop a profile while keeping them. A full index can be rebuilt from the Markdown corpus and pinned embedding model, but a backup speeds recovery. Keep the corpus and model files backed up separately.
+As checked on 2026-10-15, the [Workers AI free allocation](https://developers.cloudflare.com/workers-ai/platform/pricing/) is 10,000 neurons per UTC day, [Vectorize Free](https://developers.cloudflare.com/vectorize/platform/pricing/) includes five million stored and thirty million queried dimensions per month, and [D1 Free](https://developers.cloudflare.com/d1/platform/pricing/) has its own row and storage allowances. [Workers Free](https://developers.cloudflare.com/workers/platform/limits/) also limits requests and CPU time. These limits are account-wide, can change, and do not imply an uptime or latency guarantee.
 
-For a consistent logical database backup, stop indexing, then run (substitute the active profile's second Compose file):
+Keep the account on Workers Free and do not configure AI Gateway prepaid billing. The scripts only use free-tier-eligible products; they neither verify nor change your current subscription. **There is no application spending cap: an already paid account can bill overages instead of rejecting usage.** Check the account plan before applying. Indexing and other account applications also consume allocations. A provider hard limit stops service when its allocation is exhausted; do not upgrade automatically to recover availability.
 
-```sh
-docker compose -f infra/compose.yml -f infra/compose.local.yml exec -T db pg_dump -U rag -d rag -Fc > rag-backup.dump
-```
+The fixed generation model is the currently listed `@cf/meta/llama-3.1-8b-instruct-fp8`, not the older `-fp8-fast` identifier used in an earlier cost illustration. Its [model page](https://developers.cloudflare.com/workers-ai/models/llama-3.1-8b-instruct-fp8/) lists $0.152/M input tokens and $0.287/M output tokens outside included usage. The earlier cheaper-model estimate must not be treated as this deployment's tariff. The account must still have access to the model. Changing model IDs is a reviewed code change; no paid-only model or provider fallback is selected dynamically.
 
-Store the dump privately, outside Git, and test restoration against a **new disposable database volume** first. For example, from the repository root, start only a new `small-rag-restore` project's database and stream the dump into that exact target:
+The backend has no manual daily question counter. `DAILY_QUESTION_LIMIT` is obsolete and unused; remove it from any previously generated configuration on your next setup. The historical `daily_usage` table is left untouched to preserve applied migrations and existing data.
 
-```sh
-docker compose -p small-rag-restore -f infra/compose.yml up -d db
-docker compose -p small-rag-restore -f infra/compose.yml exec -T db pg_restore -U rag -d rag --no-owner --clean --if-exists < rag-backup.dump
-docker compose -p small-rag-restore -f infra/compose.yml exec -T db psql -U rag -d rag -c 'SELECT count(*) FROM rag_chunks;'
-```
+A binding failure returns HTTP 503 with `status: "sleeping"`, `service`, `reason`, `retry_at` and `Retry-After`. Workers AI code 3036 and documented D1 daily-row exhaustion messages additionally provide `reset_at` at the next 00:00 UTC. Other failures, including AI capacity errors and Vectorize errors with no reliable reset signal, pause for one minute before a new request may test availability. That probe time is not a promise of recovery. See [Workers AI errors](https://developers.cloudflare.com/workers-ai/platform/errors/) and [D1 errors](https://developers.cloudflare.com/d1/observability/debug-d1/).
 
-Restoration replaces data; do not run it against an existing deployment without choosing and verifying the exact target. Keep the same PostgreSQL major version for the first restore exercise. Stop the disposable restore project with `docker compose -p small-rag-restore -f infra/compose.yml down` when finished; keep or remove its volume only after deciding whether its data is needed.
+Pause state is isolate-local and requires no D1 writes. Cached pauses prevent downstream binding calls for chat and readiness, but new isolates and already-running requests can still reach Cloudflare. The provider enforces the account-wide quota. If Workers itself exhausts its request allowance, Cloudflare rejects requests before the application can format a sleep response. Monthly quotas require their actual period reset; full storage needs capacity freed by an operator. Do not automatically upgrade the plan to recover availability.
 
-Before an update, save a backup and note the current Git commit and image digests. Pull the new code/images, inspect the migration SQL, build, then run the explicit `migrate` command before `index`. Check `/health/ready` and a cited answer. For rollback, redeploy the recorded code/images and restore the matching database backup when a new migration is incompatible; older code is not guaranteed to read a newer schema. Never use `down --volumes` as an update or rollback command. Validate changes on the local profile before exposing the domain profile.
+There is no background polling, streaming, automatic generation retry or failed-question replay. The next request after the pause expires resumes ordinary processing. Input/output bounds remain; malformed model output is a generic 503, not evidence that a daily quota has run out.
 
-The index recipe now records the corpus reader and its extractor registration. After updating from a version that used the earlier Markdown-only recipe, `/health/ready` will return 503 until you run the explicit `index` command. Keep the Markdown corpus available for that rebuild; no database migration is needed for the recipe change itself.
+## Local development
+
+After provisioning/indexing, `npm run dev` executes the handler locally with remote D1, Vectorize and AI bindings. **It queries real data, consumes real AI allocation and shares the account’s Cloudflare allocations.** Do not use it as an isolated production sandbox. For independent development use a separate Cloudflare account/resources and generated configuration, with the same Free-plan checks.
+
+Set the local HTTP password in ignored `infra/.dev.vars`, using `BASIC_AUTH_PASSWORD` and a value of at least 16 characters, before running `npm run dev`. This is an operator-created secret file; the repository does not create it. Do not copy the operator API token into it. Cloudflare AI and Vectorize require authenticated remote access; there is no offline inference emulator. Use `npm test` and `npm run db:migrate:local` when you need an account-free check.
+
+## Updates and recovery
+
+Keep the Markdown corpus outside Git when private and back it up separately. The D1 and Vectorize data can be rebuilt from it with the configured extractor and embedding model. Retained generations are not a substitute for a database backup. Review Cloudflare D1 backup/export procedures before production changes.
+
+Deploy prompt/code edits with `npm run build` followed by the explicit `npm run deploy`. Reindex only when the corpus, extractor/chunk recipe or embedding model changes. A prompt-only change does not require reindexing. The old PostgreSQL corpus/index remains separate; none of these commands connects to or migrates it.
+
+No live Cloudflare deployment or inference benchmark is implied by passing local tests. Verify authentication, readiness, quota behavior, citations, real-corpus answer quality, account usage and latency after configuring your own account. The prior Raspberry Pi and Docker guides are archived in [legacy-deployment.md](legacy-deployment.md); the [performance report](performance.md) records historical local-inference measurements.

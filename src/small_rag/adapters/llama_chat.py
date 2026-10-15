@@ -2,6 +2,35 @@
 
 import httpx
 
+from small_rag.domain.models import AnswerStatus
+
+
+# Constrain both response branches; the use case still validates citation membership.
+ANSWER_SCHEMA = {
+    "oneOf": [
+        {
+            "type": "object",
+            "properties": {
+                "status": {"enum": [AnswerStatus.ANSWERED.value]},
+                "answer": {"type": "string", "minLength": 1},
+                "citations": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+            },
+            "required": ["status", "answer", "citations"],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {
+                "status": {"enum": [AnswerStatus.INSUFFICIENT_CONTEXT.value, AnswerStatus.OUT_OF_SCOPE.value]},
+                "answer": {"type": "string", "minLength": 1},
+                "citations": {"type": "array", "items": {"type": "string"}, "maxItems": 0},
+            },
+            "required": ["status", "answer", "citations"],
+            "additionalProperties": False,
+        },
+    ],
+}
+
 
 class LlamaCppGenerator:
     def __init__(self, base_url: str, model: str, timeout_seconds: int, max_output_tokens: int) -> None:
@@ -25,6 +54,11 @@ class LlamaCppGenerator:
                 "temperature": 0.1,
                 "max_tokens": self.max_output_tokens,
                 "stream": False,
+                "chat_template_kwargs": {"enable_thinking": False},
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {"name": "rag_answer", "strict": True, "schema": ANSWER_SCHEMA},
+                },
             },
         )
         response.raise_for_status()
