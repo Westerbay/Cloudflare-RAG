@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { handleRequest } from "../app.ts";
-import { EMBEDDING_MODEL } from "../config.ts";
-import { embeddingFromResponse, isObject } from "../ai.ts";
-import type { Env } from "../contracts.ts";
+import { handleRequest } from "../src/app.ts";
+import { EMBEDDING_MODEL } from "@small-rag/contracts/config";
+import { embeddingFromResponse, isObject } from "../src/ai.ts";
+import type { Env } from "../src/bindings.ts";
 import { SQLiteDatabase } from "./sqlite.ts";
 
 const PASSWORD = "test-only-not-a-real-secret";

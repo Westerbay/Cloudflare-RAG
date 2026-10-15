@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ServiceAvailability, ServiceSleeping } from "../availability.ts";
+import { ServiceAvailability, ServiceSleeping } from "../src/availability.ts";
 
 test("wrapped quota errors use the failure time across UTC midnight", async () => {
   const availability = new ServiceAvailability();

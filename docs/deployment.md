@@ -4,18 +4,14 @@ The target is Cloudflare Workers Free, Workers AI, D1 and Vectorize. There is no
 
 ## Prerequisites
 
-Use Node.js 24+ and Python 3.11+ for offline corpus preparation. Install the locked Node dependencies and the existing Python tools:
+Use Node.js 24 and pnpm 12 for the API, tooling and offline corpus preparation. Install the locked workspace dependencies:
 
 ```sh
-npm ci
-python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[dev]'
-npm test
-npm run check
-npm run build
+pnpm install --frozen-lockfile
+pnpm check
 ```
 
-Tests use SQLite and fake AI/Vectorize bindings; the build is Wrangler's deployment dry run. None of these steps provisions Cloudflare resources or calls hosted inference. Wrangler is installed locally through `package-lock.json`; no global installation, Pulumi account or infrastructure state service is required.
+Tests use SQLite and fake AI/Vectorize bindings; the build is Wrangler's deployment dry run. None of these steps provisions Cloudflare resources or calls hosted inference. Wrangler is installed locally through `pnpm-lock.yaml`; no global installation, Pulumi account or infrastructure state service is required.
 
 ## Operator credentials
 
@@ -25,7 +21,10 @@ Supply public identifiers and secrets in your shell or secret manager. This inte
 
 ```sh
 export CLOUDFLARE_ACCOUNT_ID='YOUR_32_CHARACTER_ACCOUNT_ID'
-export CLOUDFLARE_API_TOKEN="$(python3 -c 'import getpass; print(getpass.getpass("Cloudflare API token: "))')"
+printf 'Cloudflare API token: '
+read -r -s CLOUDFLARE_API_TOKEN
+printf '\n'
+export CLOUDFLARE_API_TOKEN
 ```
 
 Never paste the token into a chat, commit it, or put it in Wrangler `vars`. The scripts do not read secret files or print provider error bodies. The deployed Worker uses its AI/D1/Vectorize bindings and does not need this operator API token.
@@ -35,31 +34,31 @@ Never paste the token into a chat, commit it, or put it in Wrangler `vars`. The 
 Inspect the local plan:
 
 ```sh
-npm run infra:setup
+pnpm infra:setup
 ```
 
 Then explicitly apply it to the selected account:
 
 ```sh
-npm run infra:setup -- --apply
-npm run db:migrate:remote
+pnpm infra:setup --apply
+pnpm db:migrate:remote
 ```
 
 The setup script reuses a D1 database named `small-rag`, or creates it when absent. It similarly reuses or creates the `small-rag` Vectorize index with **1024 dimensions and cosine distance**. An incompatible existing vector index is an error; it is not replaced or deleted. Use a dedicated account/resource naming convention and inspect existing names before the first apply. On a partial failure, rerun setup to reuse resources already created.
 
-Generated account and database identifiers go into ignored `infra/wrangler.local.json`. Keep a private operational copy if desired; it contains identifiers, not API tokens or the HTTP password. `infra/wrangler.jsonc` remains the portable source template. `infra/wrangler.mjs` chooses the generated file for subsequent commands and refuses remote operations while IDs are unconfigured. Setup does not apply migrations, deploy, create secrets, subscribe to a plan or enable billing.
+Generated account and database identifiers go into ignored `infra/wrangler.local.json`. Keep a private operational copy if desired; it contains identifiers, not API tokens or the HTTP password. `infra/wrangler.jsonc` remains the portable source template. `infra/wrangler.ts` chooses the generated file for subsequent commands and refuses remote operations while IDs are unconfigured. Setup does not apply migrations, deploy, create secrets, subscribe to a plan or enable billing.
 
-D1 schema changes live in `infra/migrations/`. `npm run db:migrate:local` uses only the local Wrangler database; `npm run db:migrate:remote` changes the configured Cloudflare D1 database. Do not point that configuration at a shared or production database without reviewing the exact target and migration.
+D1 schema changes live in `packages/database/migrations/`. `pnpm db:migrate:local` uses only the local Wrangler database; `pnpm db:migrate:remote` changes the configured Cloudflare D1 database. Do not point that configuration at a shared or production database without reviewing the exact target and migration.
 
 ## Index and deploy
 
 Preview the example corpus and then publish it:
 
 ```sh
-RAG_PYTHON=.venv/bin/python npm run corpus:index
-RAG_PYTHON=.venv/bin/python npm run corpus:index -- --apply
-npm run deploy
-node infra/wrangler.mjs secret put BASIC_AUTH_PASSWORD
+pnpm corpus:index
+pnpm corpus:index --apply
+pnpm deploy
+node infra/wrangler.ts secret put BASIC_AUTH_PASSWORD
 ```
 
 Choose a strong Basic Auth password of at least 16 characters when prompted; the username is `rag`. Until the secret is configured, every route returns 503. Configure the secret only through Wrangler or the Cloudflare dashboard, not as a committed plain-text variable. All password holders can query the whole corpus. There is no public ingestion route or per-document authorization.
@@ -97,14 +96,16 @@ There is no background polling, streaming, automatic generation retry or failed-
 
 ## Local development
 
-After provisioning/indexing, `npm run dev` executes the handler locally with remote D1, Vectorize and AI bindings. **It queries real data, consumes real AI allocation and shares the account’s Cloudflare allocations.** Do not use it as an isolated production sandbox. For independent development use a separate Cloudflare account/resources and generated configuration, with the same Free-plan checks.
+After provisioning/indexing, `pnpm dev` executes the handler locally with remote D1, Vectorize and AI bindings. **It queries real data, consumes real AI allocation and shares the account’s Cloudflare allocations.** Do not use it as an isolated production sandbox. For independent development use a separate Cloudflare account/resources and generated configuration, with the same Free-plan checks.
 
-Set the local HTTP password in ignored `infra/.dev.vars`, using `BASIC_AUTH_PASSWORD` and a value of at least 16 characters, before running `npm run dev`. This is an operator-created secret file; the repository does not create it. Do not copy the operator API token into it. Cloudflare AI and Vectorize require authenticated remote access; there is no offline inference emulator. Use `npm test` and `npm run db:migrate:local` when you need an account-free check.
+If upgrading an existing checkout, rerun `pnpm infra:setup --apply` before deployment to refresh the non-secret generated entrypoint and migration paths; this only reuses the existing named resources. The migration filenames and SQL behavior are preserved, so moving their source directory does not create a new migration. Reindex explicitly with the native TypeScript extraction recipe before relying on the new corpus output.
+
+Set the local HTTP password in ignored `infra/.dev.vars`, using `BASIC_AUTH_PASSWORD` and a value of at least 16 characters, before running `pnpm dev`. This is an operator-created secret file; the repository does not create it. Do not copy the operator API token into it. Cloudflare AI and Vectorize require authenticated remote access; there is no offline inference emulator. Use `pnpm test` and `pnpm db:migrate:local` when you need an account-free check.
 
 ## Updates and recovery
 
 Keep the Markdown corpus outside Git when private and back it up separately. The D1 and Vectorize data can be rebuilt from it with the configured extractor and embedding model. Retained generations are not a substitute for a database backup. Review Cloudflare D1 backup/export procedures before production changes.
 
-Deploy prompt/code edits with `npm run build` followed by the explicit `npm run deploy`. Reindex only when the corpus, extractor/chunk recipe or embedding model changes. A prompt-only change does not require reindexing. The old PostgreSQL corpus/index remains separate; none of these commands connects to or migrates it.
+Deploy prompt/code edits with `pnpm build` followed by the explicit `pnpm deploy`. Reindex only when the corpus, extractor/chunk recipe or embedding model changes. A prompt-only change does not require reindexing. The old PostgreSQL corpus/index remains separate; none of these commands connects to or migrates it.
 
 No live Cloudflare deployment or inference benchmark is implied by passing local tests. Verify authentication, readiness, quota behavior, citations, real-corpus answer quality, account usage and latency after configuring your own account. The prior Raspberry Pi and Docker guides are archived in [legacy-deployment.md](legacy-deployment.md); the [performance report](performance.md) records historical local-inference measurements.

@@ -1,25 +1,25 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { provision } from "../../infra/setup.mjs";
-import { cloudflareClient } from "../../scripts/cloudflare-api.mjs";
+import { provision } from "../../../infra/setup.ts";
+import { cloudflareClient } from "../../../scripts/cloudflare-api.ts";
 
-const template = JSON.parse(await readFile(new URL("../../infra/wrangler.jsonc", import.meta.url), "utf8"));
+const template = JSON.parse(await readFile(new URL("../../../infra/wrangler.jsonc", import.meta.url), "utf8"));
 test("infrastructure setup reuses existing resources and refuses incompatible vector indexes", async () => {
   const calls = [];
   const client = {
     account: "a".repeat(32),
     async call(path, options = {}) {
       calls.push({ path, ...options });
-      if (path.startsWith("/d1/database?")) return [{ name: "small-rag", uuid: "11111111-1111-1111-1111-111111111111" }];
+      if (path.startsWith("/d1/database?")) return [{ name: "small-rag", uuid: "11111111-1111-4111-8111-111111111111" }];
       return { config: { dimensions: 1024, metric: "cosine" } };
     },
   };
   const config = await provision(client, template);
-  assert.equal(config.d1_databases[0].database_id, "11111111-1111-1111-1111-111111111111");
+  assert.equal(config.d1_databases[0].database_id, "11111111-1111-4111-8111-111111111111");
   assert.ok(calls.every(call => !call.method));
   client.call = async path => path.startsWith("/d1/database?")
-    ? [{ name: "small-rag", uuid: "11111111-1111-1111-1111-111111111111" }]
+    ? [{ name: "small-rag", uuid: "11111111-1111-4111-8111-111111111111" }]
     : { config: { dimensions: 384, metric: "cosine" } };
   await assert.rejects(provision(client, template), /incompatible/);
 });
@@ -33,7 +33,7 @@ test("infrastructure creation is repeatable without recreating or deleting resou
       if (options.method === "POST") {
         writes.push(path);
         if (path === "/d1/database") return database = {
-          name: "small-rag", uuid: "11111111-1111-1111-1111-111111111111",
+          name: "small-rag", uuid: "11111111-1111-4111-8111-111111111111",
         };
         assert.equal(path, "/vectorize/v2/indexes");
         return index = JSON.parse(options.body);

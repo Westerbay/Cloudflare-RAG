@@ -11,40 +11,38 @@ The deployment uses free-tier-eligible products. **There is no guaranteed daily 
 - **D1:** source passages, original chunk hashes, line ranges and the active index generation.
 - **Vectorize:** cosine search, isolated by index-generation namespace.
 - **Wrangler:** infrastructure bindings, migrations, secrets and deployment. The configuration and repeatable resource setup live in `infra/`.
-- **Python:** operator-side Markdown extraction and chunk preparation only; it is not an application server in the Cloudflare deployment.
+- **TypeScript:** the Worker, Markdown extraction, deterministic chunking, ingestion and infrastructure tooling use one pnpm workspace.
+
+The pnpm workspace layout and shared Zod contracts are inspired by [WebApp Template](https://github.com/Westerbay/WebApp-Template). `apps/api` owns the Worker; `packages/core`, `packages/contracts` and `packages/database` own pure rules, boundary schemas and D1 persistence. See [development](docs/development.md) for commands and boundaries.
 
 The [architecture guide](docs/architecture.md) describes indexing, grounding and the quota. The [deployment guide](docs/deployment.md) contains account setup, permissions, secrets, testing and recovery.
 
 ## Install and validate locally
 
-Use Node.js 24+ and Python 3.11+. From the repository root:
+Use Node.js 24 and pnpm 12. From the repository root:
 
 ```sh
-npm ci
-python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[dev]'
-npm test
-npm run check
-npm run build
-npm run infra:setup
-RAG_PYTHON=.venv/bin/python npm run corpus:index
+pnpm install --frozen-lockfile
+pnpm check
+pnpm infra:setup
+pnpm corpus:index
 ```
 
-The last two commands are **plans**: they neither create Cloudflare resources nor send documents to a provider. `build` bundles the Worker with `wrangler deploy --dry-run`; it does not deploy. Tests use local SQLite and model stand-ins, without a Cloudflare account. The Python environment retains the earlier local backend dependencies to keep its regression tests and tools usable.
+The last two commands are **plans**: they neither create Cloudflare resources nor send documents to a provider. `build` bundles the Worker with `wrangler deploy --dry-run`; it does not deploy. Tests use local SQLite and model stand-ins, without a Cloudflare account. No Python installation, virtual environment or Docker service is needed for these commands.
 
 ## Configure and deploy
 
 Use a **Workers Free** account. Supply `CLOUDFLARE_ACCOUNT_ID` and an account-scoped `CLOUDFLARE_API_TOKEN` through your operator environment; see [permissions and secure entry](docs/deployment.md#operator-credentials). Never commit a token. Then run:
 
 ```sh
-npm run infra:setup -- --apply
-npm run db:migrate:remote
-RAG_PYTHON=.venv/bin/python npm run corpus:index -- --corpus examples/corpus --apply
-npm run deploy
-node infra/wrangler.mjs secret put BASIC_AUTH_PASSWORD
+pnpm infra:setup --apply
+pnpm db:migrate:remote
+pnpm corpus:index --corpus examples/corpus --apply
+pnpm deploy
+node infra/wrangler.ts secret put BASIC_AUTH_PASSWORD
 ```
 
-`infra:setup -- --apply` reuses or creates the named D1 database and Vectorize index, checks dimensions/metric and saves non-secret IDs in ignored `infra/wrangler.local.json`. It does not change billing, deploy code, write secrets or apply migrations. Each later remote command is explicit. Choose an authentication password of at least 16 characters; Wrangler prompts for it. Until configured, the service returns 503. The HTTP Basic username is `rag` for every route, including health checks.
+`infra:setup --apply` reuses or creates the named D1 database and Vectorize index, checks dimensions/metric and saves non-secret IDs in ignored `infra/wrangler.local.json`. It does not change billing, deploy code, write secrets or apply migrations. Each later remote command is explicit. Choose an authentication password of at least 16 characters; Wrangler prompts for it. Until configured, the service returns 503. The HTTP Basic username is `rag` for every route, including health checks.
 
 Wrangler prints your `https://small-rag.<subdomain>.workers.dev` URL. A purchased domain is optional. Test with your actual URL:
 
@@ -68,16 +66,16 @@ The free-tier profile accepts up to 1500 characters per question, four history t
 Keep your Markdown files in a local directory such as ignored `data/corpus/`. Preview first:
 
 ```sh
-RAG_PYTHON=.venv/bin/python npm run corpus:index -- --corpus data/corpus
-RAG_PYTHON=.venv/bin/python npm run corpus:index -- --corpus data/corpus --apply
+pnpm corpus:index --corpus data/corpus
+pnpm corpus:index --corpus data/corpus --apply
 ```
 
 Only `.md` and `.markdown` files are read. The operator profile allows up to 100 files and 1000 chunks. It sends passages to Workers AI for embedding and stores them in D1; queries and selected passages are also processed by Cloudflare. There is no public ingestion endpoint. Unchanged corpora are detected before new embeddings are requested. Indexing stages a new generation and waits for the Vectorize mutation before activating it in D1. Run only one indexing job per index at a time.
 
-Edit `prompts/system.md` for the mission and JSON contract and `prompts/SOUL.md` for style, then rebuild/deploy. Prompt edits do not require reindexing. Switching the embedding model or extraction/chunking recipe does require reindexing; the existing PostgreSQL index is not migrated or mixed with Cloudflare embeddings.
+Edit `prompts/system.md` for the mission and JSON contract and `prompts/SOUL.md` for style, then rebuild/deploy. Prompt edits do not require reindexing. The native TypeScript extractor has a new versioned recipe: run an explicit reindex after migrating from Python. Switching the embedding model or extraction/chunking recipe also requires reindexing; the existing PostgreSQL index is not migrated or mixed with Cloudflare embeddings.
 
 ## Development and historical backend
 
-`npm run dev` runs the Worker handler locally but uses **remote AI, Vectorize and D1 bindings** after setup. It accesses real indexed documents and the same Cloudflare allocations. Configure its local Basic Auth secret as described in the [development guide](docs/deployment.md#local-development). AI and Vectorize are not offline emulators. Use `npm test` for offline behavior checks.
+`pnpm dev` runs the Worker handler locally but uses **remote AI, Vectorize and D1 bindings** after setup. It accesses real indexed documents and the same Cloudflare allocations. Configure its local Basic Auth secret as described in the [development guide](docs/deployment.md#local-development). AI and Vectorize are not offline emulators. Use `pnpm test` for offline behavior checks.
 
-The previous Python/FastAPI + PostgreSQL/pgvector + llama.cpp implementation is retained for reference and regression tests in `src/small_rag/`, `database/`, the Compose files and `scripts/benchmark_*.py`. It is **not the Cloudflare runtime**. See [legacy deployment](docs/legacy-deployment.md) and [historical Pi measurements](docs/performance.md). No existing database, model file, container or Git history is deleted by this migration.
+The previous Python/FastAPI + PostgreSQL/pgvector + llama.cpp implementation is retained as an inactive archive in `src/small_rag/`, `database/`, the Compose files and `scripts/benchmark_*.py`. It is **not the Cloudflare runtime**. See [legacy deployment](docs/legacy-deployment.md) and [historical Pi measurements](docs/performance.md). These archives are excluded from the pnpm workspace and its checks; old Python commands are not part of the supported setup. No existing database, model file, container or Git history is deleted by this migration.

@@ -1,10 +1,10 @@
 # Cloudflare architecture
 
-Small RAG runs on a Worker with Workers AI, D1 and Vectorize bindings. The Python code prepares Markdown chunks on the operator's machine; no Python service, Raspberry Pi, GPU container or PostgreSQL database is needed in the deployed path.
+Small RAG is a TypeScript pnpm workspace with a Cloudflare Worker and Node.js operator tools. The application layout is inspired by [WebApp Template](https://github.com/Westerbay/WebApp-Template). Cloudflare Workers, Workers AI, D1 and Vectorize remain the hosted runtime; no Python environment is needed to install, test, build, index or deploy.
 
 ## Indexing
 
-`npm run corpus:index` exports deterministic chunks using the existing Markdown extractor and chunker. It is a local plan until the operator adds `--apply`. Paths, source line ranges and the original content-derived chunk hashes are preserved. The default corpus is `examples/corpus`; production documents should live in an ignored directory outside the source tree.
+`pnpm corpus:index` exports deterministic chunks with markdown-it CommonMark extraction and pure TypeScript character windows. It is a local plan until the operator adds `--apply`. Paths, source line ranges and canonical content-derived chunk hashes are preserved. The default corpus is `examples/corpus`; production documents should live in an ignored directory outside the source tree.
 
 The operator script uses an explicitly selected Cloudflare account and D1 database. For a changed corpus it creates a new generation, requests embeddings, inserts passage batches into D1 and upserts vectors under the generation's namespace. Vector IDs hash both generation and original chunk ID so staged writes cannot overwrite active vectors. No source text is stored in Vectorize metadata; the passage text stays in D1. A repeat with an identical corpus hash and recipe makes no new embedding calls.
 
@@ -36,13 +36,21 @@ Bounded inputs and output remain in place to control per-request work. On an alr
 
 ## Modules and infrastructure
 
-- `worker/app.ts`: HTTP boundary, authentication, input bounds and retrieval orchestration.
-- `worker/ai.ts`: model request format, embeddings and answer/citation validation.
-- `worker/availability.ts`: provider failure classification and isolate-local pause/recovery.
-- `worker/config.ts`: fixed model IDs and free-profile bounds.
-- `infra/wrangler.jsonc`: source configuration; `infra/setup.mjs` creates/reuses resources only with `--apply`.
-- `infra/migrations/`: D1 schema; remote migrations are explicit.
-- `scripts/export_corpus.py`: local extraction and chunking.
-- `scripts/index-cloudflare.mjs`: operator-only generation staging and activation.
+- `apps/api/src/`: Worker composition, HTTP/auth boundary, Cloudflare bindings and provider availability.
+- `packages/contracts/src/`: Zod chat, answer, corpus and embedding contracts plus shared model/budget settings.
+- `packages/core/src/chunking.ts`: framework-independent source windows; no Node, Cloudflare or Zod imports.
+- `packages/database/`: minimal D1 binding types and unchanged versioned SQL migrations.
+- `infra/wrangler.jsonc`: source configuration; `infra/setup.ts` creates/reuses resources only with `--apply`.
+- `packages/database/migrations/`: D1 schema; remote migrations are explicit.
+- `scripts/corpus/export.ts`: confined, bounded local CommonMark extraction and stable source/chunk hashes.
+- `scripts/index-cloudflare.ts`: operator-only generation staging and activation.
 
 Wrangler was chosen over Pulumi for this single-provider application. Source configuration, migrations and a small repeatable setup script cover the resources without adding a second infrastructure state backend or toolchain. Setup stores only account/database identifiers in ignored `infra/wrangler.local.json`; tokens remain in the operator environment and the HTTP password is a Worker secret. No deployment or billing subscription is created by a build or test.
+
+## Workspace boundaries
+
+The template's separation of application composition, pure rules, shared contracts and persistence is reused without introducing a web application, NestJS, PostgreSQL or a second infrastructure runtime. One application does not need Turborepo. Node's test runner covers HTTP behavior, source extraction and operator staging; strict TypeScript checks include the Worker, packages and operator scripts.
+
+Core imports no framework or filesystem modules. Contracts depend on Zod and their own definitions; database owns SQL and binding types. Shared packages never import the application. The API consumes contracts/database; operator scripts compose core, contracts and Cloudflare REST access. CommonMark parsing and filesystem access stay in the Node-only exporter so they are not bundled into the Worker.
+
+The new `markdown-it-15.0.2-commonmark/utf16-v1` recipe intentionally differs from the archived Python recipe. Reindex explicitly; never reuse the previous recipe for a different parser. Source hashes, canonical relative paths, line numbers, section boundaries and deterministic IDs remain part of the citation contract. UTF-16 windows stay within the shared character budget without splitting surrogate pairs. All corpus symlinks are rejected, including directory cycles; files must be UTF-8, regular, confined and bounded. Traversal stops at 5000 entries.

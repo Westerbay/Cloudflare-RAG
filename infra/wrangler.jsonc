@@ -1,20 +1,40 @@
 {
   "$schema": "../node_modules/wrangler/config-schema.json",
   "name": "small-rag",
-  "main": "../worker/index.ts",
+  "main": "../apps/api/src/index.ts",
   "compatibility_date": "2026-10-15",
   "workers_dev": true,
-  "observability": { "enabled": false },
-  "rules": [{ "type": "Text", "globs": ["**/*.md"], "fallthrough": true }],
-  "ai": { "binding": "AI" },
-  "d1_databases": [{
-    "binding": "DB",
-    "database_name": "small-rag",
-    "database_id": "00000000-0000-0000-0000-000000000000",
-    "migrations_dir": "./migrations",
-    "remote": true
-  }],
-  "vectorize": [{ "binding": "VECTORS", "index_name": "small-rag", "remote": true }],
+  "observability": {
+    "enabled": false
+  },
+  "rules": [
+    {
+      "type": "Text",
+      "globs": [
+        "**/*.md"
+      ],
+      "fallthrough": true
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "small-rag",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../packages/database/migrations",
+      "remote": true
+    }
+  ],
+  "vectorize": [
+    {
+      "binding": "VECTORS",
+      "index_name": "small-rag",
+      "remote": true
+    }
+  ],
   "vars": {
     "MIN_SIMILARITY": "0.4"
   }

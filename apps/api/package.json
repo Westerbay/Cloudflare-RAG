@@ -1,0 +1,10 @@
+{
+  "name": "@small-rag/api",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "dependencies": {
+    "@small-rag/contracts": "workspace:*",
+    "@small-rag/database": "workspace:*"
+  }
+}

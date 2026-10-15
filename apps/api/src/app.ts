@@ -1,10 +1,13 @@
-import type { ChatInput, Database, Env, Evidence, Turn } from "./contracts.ts";
-import { embed, generateAnswer, isObject } from "./ai.ts";
+import type { ChatInput, Evidence } from "@small-rag/contracts/chat";
+import type { Database } from "@small-rag/database/bindings";
+import type { Env } from "./bindings.ts";
+import { chatInputSchema } from "@small-rag/contracts/chat";
+import { embed, generateAnswer } from "./ai.ts";
 import { ServiceAvailability, ServiceSleeping } from "./availability.ts";
 import {
   similarityThreshold, DIMENSIONS, EMBEDDING_MODEL, MAX_BODY_BYTES,
   MAX_EVIDENCE_CHARS, MAX_HISTORY_CHARS, MAX_HISTORY_TURNS, MAX_MESSAGE_CHARS, TOP_K,
-} from "./config.ts";
+} from "@small-rag/contracts/config";
 
 // Reused bindings share a pause within this isolate; no dependency on writable D1.
 const availabilityByDatabase = new WeakMap<Database, ServiceAvailability>();
@@ -60,25 +63,9 @@ async function parseInput(request: Request): Promise<ChatInput> {
   let value: unknown;
   try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
   catch { throw new RequestError(422, "Invalid JSON body"); }
-  if (!isObject(value) || Object.keys(value).some(key => !["message", "history"].includes(key))
-      || typeof value.message !== "string" || !value.message.trim() || value.message.length > MAX_MESSAGE_CHARS) {
-    throw new RequestError(422, `message must contain 1–${MAX_MESSAGE_CHARS} characters`);
-  }
-  const history: Turn[] = [];
-  const rawHistory: unknown = value.history ?? [];
-  if (!Array.isArray(rawHistory) || rawHistory.length > MAX_HISTORY_TURNS) {
-    throw new RequestError(422, `history must contain at most ${MAX_HISTORY_TURNS} turns`);
-  }
-  let historySize = 0;
-  for (const turn of rawHistory) {
-    if (!isObject(turn) || Object.keys(turn).some(key => !["role", "content"].includes(key))
-        || (turn.role !== "user" && turn.role !== "assistant")
-        || typeof turn.content !== "string" || !turn.content.trim()) throw new RequestError(422, "Invalid history turn");
-    historySize += turn.content.length;
-    history.push({ role: turn.role, content: turn.content });
-  }
-  if (historySize > MAX_HISTORY_CHARS) throw new RequestError(422, "History exceeds the configured character budget");
-  return { message: value.message, history };
+  const parsed = chatInputSchema.safeParse(value);
+  if (!parsed.success) throw new RequestError(422, "Invalid chat input");
+  return parsed.data;
 }
 
 async function activeGeneration(db: Database, availability: ServiceAvailability, clock: () => number): Promise<string> {

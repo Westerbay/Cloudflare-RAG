@@ -1,17 +1,15 @@
-import type { AIBinding, Evidence, ChatInput } from "./contracts.ts";
-import { CHAT_MODEL, DIMENSIONS, EMBEDDING_MODEL, MAX_OUTPUT_TOKENS } from "./config.ts";
+import { embeddingResponseSchema } from "@small-rag/contracts/ai";
+import { modelAnswerSchema } from "@small-rag/contracts/chat";
+import type { Evidence, ChatInput } from "@small-rag/contracts/chat";
+import type { AIBinding } from "./bindings.ts";
+import { CHAT_MODEL, EMBEDDING_MODEL, MAX_OUTPUT_TOKENS } from "@small-rag/contracts/config";
 
 export function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function embeddingFromResponse(value: unknown): number[] {
-  if (!isObject(value) || !Array.isArray(value.data)) throw new Error("Invalid embedding response");
-  const vector: unknown = value.data[0];
-  if (!Array.isArray(vector) || vector.length !== DIMENSIONS
-      || !vector.every(item => typeof item === "number" && Number.isFinite(item))
-      || !vector.some(item => item !== 0)) throw new Error("Invalid embedding dimensions or values");
-  return vector;
+  return embeddingResponseSchema.parse(value).data[0];
 }
 
 export async function embed(ai: AIBinding, text: string): Promise<number[]> {
@@ -55,21 +53,16 @@ export async function generateAnswer(
     },
     required: ["status", "answer", "citations"], additionalProperties: false,
   };
-  const value = modelAnswer(await ai.run(CHAT_MODEL, {
+  const value = modelAnswerSchema.parse(modelAnswer(await ai.run(CHAT_MODEL, {
     messages: [{ role: "system", content: prompt }, { role: "user", content: JSON.stringify(payload) }],
     response_format: { type: "json_schema", json_schema: schema },
     max_tokens: MAX_OUTPUT_TOKENS, temperature: 0.1, stream: false,
-  }));
-  if (!isObject(value) || typeof value.answer !== "string" || !value.answer.trim()
-      || !Array.isArray(value.citations)) throw new Error("Invalid answer contract");
-  if (value.status !== "answered" && value.status !== "insufficient_context" && value.status !== "out_of_scope") {
-    throw new Error("Unknown answer status");
-  }
+  })));
   if (refusalRequired && value.status !== "insufficient_context") throw new Error("Invalid refusal status");
   const chosen = new Map(evidence.map(item => [item.id, item]));
   const aliases: string[] = [];
   for (const id of value.citations) {
-    if (typeof id !== "string" || !chosen.has(id)) throw new Error("Unknown citation");
+    if (!chosen.has(id)) throw new Error("Unknown citation");
     if (!aliases.includes(id)) aliases.push(id);
   }
   if ((value.status === "answered" && aliases.length === 0)

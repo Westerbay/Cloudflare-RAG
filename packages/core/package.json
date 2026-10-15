@@ -1,0 +1,9 @@
+{
+  "name": "@small-rag/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./chunking": "./src/chunking.ts"
+  }
+}

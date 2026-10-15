@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { publishCorpus, validateCorpus } from "../../scripts/index-cloudflare.mjs";
-import { EMBEDDING_MODEL } from "../config.ts";
+import { publishCorpus, validateCorpus } from "../../../scripts/index-cloudflare.ts";
+import { EMBEDDING_MODEL } from "@small-rag/contracts/config";
 import { SQLiteDatabase } from "./sqlite.ts";
 
 const corpus = {
@@ -10,7 +10,7 @@ const corpus = {
     line_start: 1, line_end: 3, text: "Cloudflare runs the model." }],
 };
 const config = { account_id: "a".repeat(32),
-  d1_databases: [{ database_id: "11111111-1111-1111-1111-111111111111" }], vectorize: [{ index_name: "small-rag" }] };
+  d1_databases: [{ database_id: "11111111-1111-4111-8111-111111111111" }], vectorize: [{ index_name: "small-rag" }] };
 
 function fixture() {
   const db = new SQLiteDatabase();
