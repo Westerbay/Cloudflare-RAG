@@ -1,0 +1,37 @@
+{
+  "name": "small-rag",
+  "version": "0.2.0",
+  "private": true,
+  "description": "A source-grounded Markdown chatbot on Cloudflare Workers AI, D1 and Vectorize",
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=12"
+  },
+  "scripts": {
+    "dev": "node infra/wrangler.ts dev",
+    "test": "node --test apps/api/test/*.test.* packages/core/test/*.test.ts scripts/test/*.test.ts",
+    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "build": "node infra/wrangler.ts deploy --dry-run --outdir ../dist/worker",
+    "infra:setup": "node infra/setup.ts",
+    "db:migrate:local": "node infra/wrangler.ts d1 migrations apply DB --local",
+    "db:migrate:remote": "node infra/wrangler.ts d1 migrations apply DB --remote",
+    "corpus:export": "node scripts/index-cloudflare.ts --export-only",
+    "corpus:index": "node scripts/index-cloudflare.ts",
+    "deploy": "node infra/wrangler.ts deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2",
+    "wrangler": "4.151.0"
+  },
+  "packageManager": "pnpm@12.11.2",
+  "dependencies": {
+    "@small-rag/contracts": "workspace:*",
+    "@small-rag/core": "workspace:*",
+    "@small-rag/database": "workspace:*",
+    "markdown-it": "15.0.2",
+    "zod": "4.6.2"
+  }
+}

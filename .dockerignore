@@ -11,3 +11,7 @@ tests
 docs
 infra
 *.dump
+node_modules
+.wrangler
+dist
+worker

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "small-rag"
 version = "0.1.0"
-description = "A small, explicit RAG for Raspberry Pi"
+description = "Markdown corpus preparation and legacy local tools for Small RAG on Cloudflare"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

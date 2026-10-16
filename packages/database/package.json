@@ -1,0 +1,9 @@
+{
+  "name": "@small-rag/database",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./bindings": "./src/bindings.ts"
+  }
+}

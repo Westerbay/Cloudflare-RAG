@@ -50,12 +50,14 @@ def _service(hits: tuple[SearchHit, ...], generator: StubGenerator) -> AnswerQue
 
 
 def test_relevant_question_returns_only_selected_source_citation() -> None:
-    generator = StubGenerator(json.dumps({"status": "answered", "answer": "Il a 8 Go.", "citations": ["source-1"]}))
+    generator = StubGenerator(json.dumps({"status": "answered", "answer": "Il a 8 Go.", "citations": ["s1"]}))
 
     answer = asyncio.run(_service((_hit(),), generator).ask("Combien de RAM ?"))
 
     assert answer.status == AnswerStatus.ANSWERED
     assert answer.text == "Il a 8 Go."
+    assert answer.citations[0].chunk_id == "source-1"
+    assert json.loads(generator.calls[0][1])["evidence"][0]["id"] == "s1"
     assert [(citation.document_path, citation.line_start, citation.line_end) for citation in answer.citations] == [
         ("pi.md", 2, 3)
     ]
@@ -84,7 +86,7 @@ def test_no_evidence_cannot_become_an_answer() -> None:
         asyncio.run(_service((), generator).ask("How much RAM?"))
 
 
-@pytest.mark.parametrize("citations", [[], ["invented"], ["source-1", "invented"]])
+@pytest.mark.parametrize("citations", [[], ["invented"], ["s1", "invented"], ["source-1"]])
 def test_missing_or_unknown_citation_refuses_answer(citations: list[str]) -> None:
     generator = StubGenerator([
         json.dumps({"status": "answered", "answer": "Unsupported", "citations": citations}),
@@ -97,6 +99,26 @@ def test_missing_or_unknown_citation_refuses_answer(citations: list[str]) -> Non
     assert answer.text == "Je ne peux pas le vérifier."
     assert answer.citations == ()
     assert json.loads(generator.calls[1][1])["evidence"] == []
+
+
+def test_short_citations_restore_source_ids_in_model_order_without_duplicates() -> None:
+    first = _hit()
+    second = SearchHit(
+        Chunk(chunk_id="another-source", document_path="deploy.md", ordinal=0,
+              heading="Deployment", line_start=5, line_end=7, text="Caddy serves HTTPS."),
+        0.7,
+    )
+    generator = StubGenerator(json.dumps({
+        "status": "answered", "answer": "Caddy serves HTTPS; the Pi has 8 GB.",
+        "citations": ["s2", "s1", "s2"],
+    }))
+
+    answer = asyncio.run(_service((first, second), generator).ask("Describe the host and HTTPS."))
+
+    assert [(c.chunk_id, c.document_path, c.line_start, c.line_end) for c in answer.citations] == [
+        ("another-source", "deploy.md", 5, 7),
+        ("source-1", "pi.md", 2, 3),
+    ]
 
 
 def test_malicious_document_and_history_are_delimited_as_untrusted_data() -> None:

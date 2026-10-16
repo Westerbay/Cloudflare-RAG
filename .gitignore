@@ -12,3 +12,7 @@ dist/
 data/
 models/
 *.gguf
+node_modules/
+.wrangler/
+.dev.vars*
+infra/wrangler.local.json

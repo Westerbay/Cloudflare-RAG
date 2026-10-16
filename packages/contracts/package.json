@@ -1,0 +1,15 @@
+{
+  "name": "@small-rag/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./config": "./src/config.ts",
+    "./chat": "./src/chat.ts",
+    "./corpus": "./src/corpus.ts",
+    "./ai": "./src/ai.ts"
+  },
+  "dependencies": {
+    "zod": "4.6.2"
+  }
+}

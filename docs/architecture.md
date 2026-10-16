@@ -1,41 +1,56 @@
-# How the RAG works
+# Cloudflare architecture
 
-The application has two separate paths. **Indexing** prepares searchable evidence when the Markdown corpus changes. **Answering** uses that index for each question. Neither path trains or fine-tunes a model.
-
-```mermaid
-flowchart LR
-  M[Markdown files] --> R[Corpus reader: file registry]
-  R --> X[Text extractor port: Markdown adapter]
-  X --> C[Chunks with path, heading and line numbers]
-  C --> E[Embedding port: llama.cpp embedding server]
-  E --> D[(PostgreSQL + pgvector)]
-  Q[Question] --> QE[Same embedding model]
-  QE --> S[Cosine search: top matching chunks]
-  D --> S
-  S --> G[Evidence and mission guardrails]
-  Q --> G
-  G --> L[llama.cpp chat server]
-  L --> A[Answer with checked citation IDs]
-```
+Small RAG is a TypeScript pnpm workspace with a Cloudflare Worker and Node.js operator tools. The application layout is inspired by [WebApp Template](https://github.com/Westerbay/WebApp-Template). Cloudflare Workers, Workers AI, D1 and Vectorize remain the hosted runtime; no Python environment is needed to install, test, build, index or deploy.
 
 ## Indexing
 
-`python -m small_rag.cli migrate` applies versioned SQL migrations. `python -m small_rag.cli index` then walks the configured corpus, extracts Markdown text, divides it into bounded chunks, asks the embedding server for one 1024-number vector per chunk, and stores vectors plus source metadata. The active index generation changes only after the complete rebuild succeeds. A failed rebuild leaves the previous generation available. These are operator commands; API startup and chat requests never index files.
+`pnpm corpus:index` exports deterministic chunks with markdown-it CommonMark extraction and pure TypeScript character windows. It is a local plan until the operator adds `--apply`. Paths, source line ranges and canonical content-derived chunk hashes are preserved. The default corpus is `examples/corpus`; production documents should live in an ignored directory outside the source tree.
 
-The application depends on two input ports: a corpus reader enumerates documents, and a text extractor converts one source file into extracted text. The file reader dispatches by registered extension; this release registers only `.md` and `.markdown` with the Markdown adapter. To add PDF later, implement a PDF extractor and register `.pdf` in the outer composition layer. The indexing use case, chunker and database port remain unchanged. A new extractor or a changed registration changes the index recipe, so rebuild the index before querying. No adapter for other formats is shipped or implied.
+The operator script uses an explicitly selected Cloudflare account and D1 database. For a changed corpus it creates a new generation, requests embeddings, inserts passage batches into D1 and upserts vectors under the generation's namespace. Vector IDs hash both generation and original chunk ID so staged writes cannot overwrite active vectors. No source text is stored in Vectorize metadata; the passage text stays in D1. A repeat with an identical corpus hash and recipe makes no new embedding calls.
 
-An embedding model maps a text passage to a vector learned during its pretraining and retrieval training. Texts with similar meaning should land near one another in that vector space. The embedding model does **not** answer the question. The same embedding model and indexing recipe must be used for stored chunks and incoming questions; changing them requires a rebuild. Its quality is statistical, so a nearby vector is a candidate passage, not proof that a fact is true.
+Vectorize writes are asynchronous. The script polls its last submitted mutation before changing D1's active-generation pointer. Activation is one SQL statement that also verifies the staged chunk count. Provider errors, incomplete vectors or missing passages leave the old active generation intact. Failed or old generations are retained, not automatically deleted. Run one indexing job at a time: competing operators can otherwise delay mutation confirmation. Staging is rejected if its estimated total stored vector dimensions would exceed the Free allowance for this index. This estimate does not account for other indexes in the account.
 
-## Answering
+The operator retains the Markdown files as the source of truth. There is no public ingestion API and no automatic indexing at startup or chat time. Changing extraction, chunking or embedding models requires rebuilding from those sources. Existing PostgreSQL vectors are not reused with Cloudflare model outputs, even when their dimensions happen to match.
 
-`POST /v1/chat` embeds the question, asks pgvector for the nearest chunks, filters weak matches, and sends bounded evidence to the chat model. In PostgreSQL, `<=>` is pgvector's cosine **distance** operator: smaller means closer. The application converts it to a similarity score for its threshold. The chat model receives the mission from `prompts/system.md` and the voice from `prompts/SOUL.md`. It must emit citation IDs from the retrieved evidence. The application checks those IDs and returns relative Markdown paths and line ranges. When no acceptable evidence remains, it asks the model to phrase a short refusal in the question's language while enforcing the `insufficient_context` status and empty citations. An invalid refusal produces an API error. An invalid answered citation triggers one additional refusal generation attempt.
+## Answering and grounding
 
-These guardrails limit the answer path but cannot guarantee factual correctness. In particular, a valid citation ID proves that a retrieved chunk was supplied, not that every sentence is supported by that chunk. Calibrate the similarity threshold and review real answers with representative French questions before exposing the service widely.
+The Worker authenticates every route with HTTP Basic (`rag` and a Cloudflare secret). With no valid configured secret it returns 503; invalid credentials return 401 before storage or model access. All credential holders can access the entire indexed corpus. This is the same single-user access model as the earlier Caddy deployment, not a per-document permission system.
 
-## Components and boundaries
+For a valid chat request, the Worker reads the active D1 generation, embeds the question, queries Vectorize in that generation's namespace, filters weak similarity scores and fetches passages from D1. It uses at most four candidate passages and 3000 characters of evidence. Missing D1 passages for matched vector IDs are an error rather than a reason to use unrelated data.
 
-`llama.cpp` is a C/C++ inference project and executable suite, not one source file. Its `llama-server` executable loads local GGUF weights and exposes HTTP endpoints. This stack runs separate server containers for embeddings and chat so each model can stay loaded. FastAPI owns the HTTP application; PostgreSQL stores the index; Caddy terminates HTTPS, authenticates callers and proxies requests to FastAPI. Only Caddy has public host ports in the domain profile. See [deployment.md](deployment.md) for the exact network and operating steps.
+The model receives the mission and style files bundled at deployment, with the question, history and evidence serialized as untrusted JSON. Evidence IDs are short request-local aliases (`s1`, `s2`, and so on). The Worker checks status, answer text and citation membership, then restores the original hashes, paths and line ranges in the HTTP response. Chat history is never used as evidence. No qualifying evidence forces an `insufficient_context` refusal. Other refusal statuses require no citations; answered responses require at least one selected citation.
 
-The `ChunkWriter` and `ChunkSearcher` ports separate the indexing and answering needs. The PostgreSQL adapter implements both. The `Generator` port describes the exact two-prompt call used by the answering use case. FastAPI and the CLI construct concrete adapters at the outer boundary.
+Workers AI receives a JSON schema and a 200-token output cap. Its response must still pass application validation. Invalid JSON, unknown citations, truncation, provider failure and incompatible indexes return 503. There is no automatic retry, alternative paid provider or local-model fallback. Valid citation membership proves only that a passage was supplied; it cannot prove that every factual sentence follows from that passage. Model quality and latency remain to be measured against the operator's account and real corpus.
 
-The `/v1` prefix reserves room for future incompatible API contracts while keeping the current request and response shape stable. “Retrieval” is the question-time search between question embedding and answer generation. It does not refer to downloading the model or ingesting documents.
+## Provider quotas and service availability
+
+There is no manual daily admission counter or limit on question count. Cloudflare enforces its account-wide allocations. The historical `daily_usage` table is retained for migration compatibility but is never read or written by the Worker; old rows do not block questions.
+
+`ServiceAvailability` wraps D1 reads, Workers AI calls and Vectorize operations. A binding failure returns a redacted HTTP 503 with `status: "sleeping"`, `service`, `reason`, `retry_at` and `Retry-After`. Only documented daily exhaustion signals (Workers AI code 3036 and D1 daily row-limit messages) set `reason: "quota_exhausted"` and `reset_at` to the next UTC midnight. AI capacity error 3040 is not daily exhaustion. Error causes are inspected without exposing provider messages.
+
+Unknown failures, including Vectorize errors without a documented reset signal, pause for one minute. After expiry, the next valid request tries the regular operation; there are no background probes or replay of failed questions. If the service is still unavailable it pauses again. `retry_at` is a probe time, never an invented monthly or storage reset. Storage exhaustion needs an operator to free capacity; monthly allowances do not reset at midnight every day.
+
+Pause state is best-effort and isolate-local, associated with the D1 binding identity. Cached sleep blocks chat and readiness before downstream access, including AI when D1/Vectorize is unavailable. Liveness and authentication continue to work. No pause persistence depends on an exhausted database. A cold isolate or an in-flight request can still reach the provider; Cloudflare is the global enforcement authority. Exhausting the Workers request quota can prevent the handler from executing at all, so application JSON and retry headers are not guaranteed in that case.
+
+Bounded inputs and output remain in place to control per-request work. On an already paid account, Cloudflare can bill overages rather than return a free-tier exhaustion error; this behavior is not a financial spending cap. The deployment must remain on Workers Free for the intended zero-cost policy.
+
+## Modules and infrastructure
+
+- `apps/api/src/`: Worker composition, HTTP/auth boundary, Cloudflare bindings and provider availability.
+- `packages/contracts/src/`: Zod chat, answer, corpus and embedding contracts plus shared model/budget settings.
+- `packages/core/src/chunking.ts`: framework-independent source windows; no Node, Cloudflare or Zod imports.
+- `packages/database/`: minimal D1 binding types and unchanged versioned SQL migrations.
+- `infra/wrangler.jsonc`: source configuration; `infra/setup.ts` creates/reuses resources only with `--apply`.
+- `packages/database/migrations/`: D1 schema; remote migrations are explicit.
+- `scripts/corpus/export.ts`: confined, bounded local CommonMark extraction and stable source/chunk hashes.
+- `scripts/index-cloudflare.ts`: operator-only generation staging and activation.
+
+Wrangler was chosen over Pulumi for this single-provider application. Source configuration, migrations and a small repeatable setup script cover the resources without adding a second infrastructure state backend or toolchain. Setup stores only account/database identifiers in ignored `infra/wrangler.local.json`; tokens remain in the operator environment and the HTTP password is a Worker secret. No deployment or billing subscription is created by a build or test.
+
+## Workspace boundaries
+
+The template's separation of application composition, pure rules, shared contracts and persistence is reused without introducing a web application, NestJS, PostgreSQL or a second infrastructure runtime. One application does not need Turborepo. Node's test runner covers HTTP behavior, source extraction and operator staging; strict TypeScript checks include the Worker, packages and operator scripts.
+
+Core imports no framework or filesystem modules. Contracts depend on Zod and their own definitions; database owns SQL and binding types. Shared packages never import the application. The API consumes contracts/database; operator scripts compose core, contracts and Cloudflare REST access. CommonMark parsing and filesystem access stay in the Node-only exporter so they are not bundled into the Worker.
+
+The new `markdown-it-15.0.2-commonmark/utf16-v1` recipe intentionally differs from the archived Python recipe. Reindex explicitly; never reuse the previous recipe for a different parser. Source hashes, canonical relative paths, line numbers, section boundaries and deterministic IDs remain part of the citation contract. UTF-16 windows stay within the shared character budget without splitting surrogate pairs. All corpus symlinks are rejected, including directory cycles; files must be UTF-8, regular, confined and bounded. Traversal stops at 5000 entries.

@@ -1,56 +1,81 @@
 # Small RAG
 
-A small, explicit retrieval-augmented chatbot intended for a Raspberry Pi 5 with 8 GB of RAM. It uses Markdown, PostgreSQL/pgvector, two llama.cpp servers, FastAPI and optional Caddy HTTPS access. The [architecture guide](docs/architecture.md) explains both RAG phases; the [deployment guide](docs/deployment.md) covers local and domain operation.
+A source-grounded Markdown chatbot hosted on **Cloudflare Workers, Workers AI, D1 and Vectorize**, using **Cloudflare’s own service quotas**, without a manual daily question counter. No Raspberry Pi, GPU server, PostgreSQL instance or Docker deployment is required for the active architecture.
 
-## Boundaries
+The deployment uses free-tier-eligible products. **There is no guaranteed daily answer count or application spending cap.** AI input/output length, indexing, other applications sharing the account, and platform limits determine when a free allocation is exhausted. Stay on Workers Free, do not enable prepaid AI Gateway billing, and review the [free-tier limits](docs/deployment.md#free-tier-boundaries). This project never automatically upgrades a plan or retries through a paid provider.
 
-- `src/small_rag/domain/` holds provider-independent data types.
-- `src/small_rag/application/` holds ports and use cases.
-- `src/small_rag/adapters/` holds Markdown, llama.cpp and PostgreSQL adapters.
-- `src/small_rag/api.py` exposes the HTTP boundary.
-- `prompts/` holds the editable mission contract and assistant voice.
-- `database/migrations/` holds versioned SQL migrations.
-- `infra/` holds Docker Compose profiles and Caddy configuration.
-- `scripts/` holds explicit model download and target-machine benchmark commands.
+## Architecture
 
-The intended flow is Markdown extraction → chunks → embeddings → PostgreSQL/pgvector → retrieval → grounded chat answer with citations. The application never trains a model; an operator supplies local GGUF files outside Git.
+- **Workers:** authenticated `POST /v1/chat` and health endpoints.
+- **Workers AI:** `@cf/meta/llama-3.1-8b-instruct-fp8` for generation and `@cf/qwen/qwen3-embedding-0.6b` for 1024-dimensional embeddings.
+- **D1:** source passages, original chunk hashes, line ranges and the active index generation.
+- **Vectorize:** cosine search, isolated by index-generation namespace.
+- **Wrangler:** infrastructure bindings, migrations, secrets and deployment. The configuration and repeatable resource setup live in `infra/`.
+- **TypeScript:** the Worker, Markdown extraction, deterministic chunking, ingestion and infrastructure tooling use one pnpm workspace.
 
-## Development setup
+The pnpm workspace layout and shared Zod contracts are inspired by [WebApp Template](https://github.com/Westerbay/WebApp-Template). `apps/api` owns the Worker; `packages/core`, `packages/contracts` and `packages/database` own pure rules, boundary schemas and D1 persistence. See [development](docs/development.md) for commands and boundaries.
 
-Use Python 3.11 or newer:
+The [architecture guide](docs/architecture.md) describes indexing, grounding and the quota. The [deployment guide](docs/deployment.md) contains account setup, permissions, secrets, testing and recovery.
+
+## Install and validate locally
+
+Use Node.js 24 and pnpm 12. From the repository root:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[dev]'
-.venv/bin/python -m pytest
+pnpm install --frozen-lockfile
+pnpm check
+pnpm infra:setup
+pnpm corpus:index
 ```
 
-Configuration uses environment variables prefixed with `RAG_`. `RAG_DATABASE_URL` is required and must be a PostgreSQL URL with a host and database name. For example, an operator can supply it through their shell or a private deployment secret:
+The last two commands are **plans**: they neither create Cloudflare resources nor send documents to a provider. `build` bundles the Worker with `wrangler deploy --dry-run`; it does not deploy. Tests use local SQLite and model stand-ins, without a Cloudflare account. No Python installation, virtual environment or Docker service is needed for these commands.
+
+## Configure and deploy
+
+Use a **Workers Free** account. Supply `CLOUDFLARE_ACCOUNT_ID` and an account-scoped `CLOUDFLARE_API_TOKEN` through your operator environment; see [permissions and secure entry](docs/deployment.md#operator-credentials). Never commit a token. Then run:
 
 ```sh
-export RAG_DATABASE_URL='postgresql://rag_user:your-password@localhost:5432/rag'
+pnpm infra:setup --apply
+pnpm db:migrate:remote
+pnpm corpus:index --corpus examples/corpus --apply
+pnpm deploy
+node infra/wrangler.ts secret put BASIC_AUTH_PASSWORD
 ```
 
-This example is illustrative; do not commit real credentials. The configuration validates input when `AppSettings()` is created. Non-secret defaults and bounds are defined in `src/small_rag/config.py`. The initial `RAG_MIN_SIMILARITY` value is provisional and must be calibrated with example questions before relying on answer quality.
+`infra:setup --apply` reuses or creates the named D1 database and Vectorize index, checks dimensions/metric and saves non-secret IDs in ignored `infra/wrangler.local.json`. It does not change billing, deploy code, write secrets or apply migrations. Each later remote command is explicit. Choose an authentication password of at least 16 characters; Wrangler prompts for it. Until configured, the service returns 503. The HTTP Basic username is `rag` for every route, including health checks.
 
-## Local operation
-
-Start a disposable PostgreSQL/pgvector instance as described in [infra/README.md](infra/README.md). Start separate llama.cpp servers for chat and embeddings using local GGUF files, then set `RAG_CHAT_URL` and `RAG_EMBEDDING_URL` to their HTTP addresses. The embedding server must return 1024-dimensional vectors. Apply migrations and build the index explicitly:
+Wrangler prints your `https://small-rag.<subdomain>.workers.dev` URL. A purchased domain is optional. Test with your actual URL:
 
 ```sh
-.venv/bin/python -m small_rag.cli migrate
-.venv/bin/python -m small_rag.cli index
-.venv/bin/uvicorn small_rag.api:create_app --factory --host 127.0.0.1 --port 8000
-```
-
-The API process does not migrate or index on startup. `/health/live` checks the process; `/health/ready` checks the active index, its recipe and both model servers. A failed readiness check returns HTTP 503. A request with invalid input returns 422; a missing index or provider outage returns 503. For example:
-
-```sh
-curl -sS http://127.0.0.1:8000/v1/chat \
+curl -u rag https://small-rag.YOUR-SUBDOMAIN.workers.dev/v1/chat \
   -H 'Content-Type: application/json' \
-  -d '{"message":"What does the indexed corpus say about the Raspberry Pi?","history":[]}'
+  -d '{"message":"What does the corpus say about the Raspberry Pi?","history":[]}'
 ```
 
-The response has `status` (`answered`, `insufficient_context` or `out_of_scope`), `answer`, and `citations` with relative Markdown paths and source line ranges. The API has no ingestion route. Keep this local server bound to loopback; the [Caddy domain profile](docs/deployment.md#domain-profile) supplies public TLS and authentication.
+`curl` prompts for the password. The response includes `status` (`answered`, `insufficient_context` or `out_of_scope`), `answer`, and `citations` with original chunk IDs, relative source paths and line ranges. This is an API; it does not include a chat web interface.
 
-Edit `prompts/system.md` for the mission and `prompts/SOUL.md` for tone. The API loads both at startup; `RAG_SYSTEM_PROMPT_PATH` and `RAG_SOUL_PATH` can point to other UTF-8 files. Restart the API after edits. Prompt changes do not require reindexing.
+## Cloudflare quotas and service sleep
+
+There is no local question quota. When a Cloudflare binding fails, the API returns HTTP 503 with `status: "sleeping"`, the affected `service`, and `Retry-After`. Recognized Workers AI daily-allocation errors and D1 daily-row-limit errors pause requests until **00:00 UTC**, exposed as `reset_at`. Other failures pause for one minute; `retry_at` indicates when a new request may probe availability, not a promised quota reset. There is no background polling or automatic retry of the failed question.
+
+The pause is cached per Worker isolate, without requiring D1 writes. While cached, chat and readiness calls skip all downstream bindings; authenticated liveness stays available. New isolates and already-running requests may still reach Cloudflare, which enforces the account-wide limits. If the Workers request quota itself is exhausted, Cloudflare can reject the request before our handler runs. Monthly quotas may need a monthly reset; storage limits require operator action, not waiting until tomorrow. Stay on Workers Free for provider-enforced free limits: a paid account can continue billing instead of reporting exhaustion. Indexing and development calls consume the same account allocations.
+The free-tier profile accepts up to 1500 characters per question, four history turns totalling 2000 characters, a 16 KiB request body, 3000 evidence characters and 200 generated tokens. Oversized input is rejected instead of silently truncated. Evidence is bounded before generation. Invalid model output, unknown citations, absent indexes and provider outages fail closed with HTTP 503.
+
+## Index your documents
+
+Keep your Markdown files in a local directory such as ignored `data/corpus/`. Preview first:
+
+```sh
+pnpm corpus:index --corpus data/corpus
+pnpm corpus:index --corpus data/corpus --apply
+```
+
+Only `.md` and `.markdown` files are read. The operator profile allows up to 100 files and 1000 chunks. It sends passages to Workers AI for embedding and stores them in D1; queries and selected passages are also processed by Cloudflare. There is no public ingestion endpoint. Unchanged corpora are detected before new embeddings are requested. Indexing stages a new generation and waits for the Vectorize mutation before activating it in D1. Run only one indexing job per index at a time.
+
+Edit `prompts/system.md` for the mission and JSON contract and `prompts/SOUL.md` for style, then rebuild/deploy. Prompt edits do not require reindexing. The native TypeScript extractor has a new versioned recipe: run an explicit reindex after migrating from Python. Switching the embedding model or extraction/chunking recipe also requires reindexing; the existing PostgreSQL index is not migrated or mixed with Cloudflare embeddings.
+
+## Development and historical backend
+
+`pnpm dev` runs the Worker handler locally but uses **remote AI, Vectorize and D1 bindings** after setup. It accesses real indexed documents and the same Cloudflare allocations. Configure its local Basic Auth secret as described in the [development guide](docs/deployment.md#local-development). AI and Vectorize are not offline emulators. Use `pnpm test` for offline behavior checks.
+
+The previous Python/FastAPI + PostgreSQL/pgvector + llama.cpp implementation is retained as an inactive archive in `src/small_rag/`, `database/`, the Compose files and `scripts/benchmark_*.py`. It is **not the Cloudflare runtime**. See [legacy deployment](docs/legacy-deployment.md) and [historical Pi measurements](docs/performance.md). These archives are excluded from the pnpm workspace and its checks; old Python commands are not part of the supported setup. No existing database, model file, container or Git history is deleted by this migration.
