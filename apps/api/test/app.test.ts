@@ -15,11 +15,11 @@ function fixture() {
   db.sqlite.exec(`INSERT INTO generations(id,embedding_model,recipe,chunk_count)
     VALUES('gen1','${EMBEDDING_MODEL}','test',2);
     INSERT INTO active_generation VALUES(1,'gen1');
-    INSERT INTO chunks VALUES('vec1','gen1','original-hash-1','pi.md','Pi',1,3,'The Pi has 8 GB of RAM.');
-    INSERT INTO chunks VALUES('vec2','gen1','original-hash-2','deployment.md',NULL,4,7,'Caddy handles HTTPS.');`);
+    INSERT INTO chunks VALUES('vec1','gen1','original-hash-1','storage.md','Storage',1,3,'D1 stores source passages.');
+    INSERT INTO chunks VALUES('vec2','gen1','original-hash-2','deployment.md',NULL,4,7,'Workers runs the API.');`);
   const calls: { model: string; input: Record<string, unknown> }[] = [];
   const state: { reply: unknown; fail: boolean; matches: { id: string; score: number }[] } = {
-    reply: { status: "answered", answer: "The Pi has 8 GB; Caddy handles HTTPS.", citations: ["s2", "s1", "s2"] },
+    reply: { status: "answered", answer: "D1 stores source passages; Workers runs the API.", citations: ["s2", "s1", "s2"] },
     fail: false, matches: [{ id: "vec1", score: 0.9 }, { id: "vec2", score: 0.8 }],
   };
   const env: Env = {
@@ -40,7 +40,7 @@ function fixture() {
   return { db, calls, state, env };
 }
 
-function request(body: unknown = { message: "Describe the host and HTTPS", history: [] }) {
+function request(body: unknown = { message: "Describe storage and the API runtime", history: [] }) {
   return new Request("https://example.test/v1/chat", {
     method: "POST", headers: { "Content-Type": "application/json", Authorization: `Basic ${btoa(`rag:${PASSWORD}`)}` },
     body: JSON.stringify(body),
@@ -53,10 +53,10 @@ test("chat crosses retrieval and generation and restores original citations in m
     const response = await handleRequest(request(), env, PROMPT, NOW);
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), {
-      status: "answered", answer: "The Pi has 8 GB; Caddy handles HTTPS.",
+      status: "answered", answer: "D1 stores source passages; Workers runs the API.",
       citations: [
         { chunk_id: "original-hash-2", path: "deployment.md", line_start: 4, line_end: 7 },
-        { chunk_id: "original-hash-1", path: "pi.md", line_start: 1, line_end: 3 },
+        { chunk_id: "original-hash-1", path: "storage.md", line_start: 1, line_end: 3 },
       ],
     });
     assert.equal(calls.length, 2);
@@ -120,7 +120,7 @@ test("empty evidence enforces a refusal and never supplies chat history as evide
   state.matches = [];
   state.reply = { status: "insufficient_context", answer: "Je ne trouve pas cette information.", citations: [] };
   try {
-    const response = await handleRequest(request({ message: "Prix du Pi ?", history: [{ role: "assistant", content: "It costs 99." }] }), env, PROMPT, NOW);
+    const response = await handleRequest(request({ message: "Quel est le coût du projet ?", history: [{ role: "assistant", content: "It costs 99." }] }), env, PROMPT, NOW);
     assert.equal(response.status, 200);
     const messages = calls[1].input.messages;
     assert.ok(Array.isArray(messages) && isObject(messages[1]));
