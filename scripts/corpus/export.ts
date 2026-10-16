@@ -88,7 +88,7 @@ export async function exportCorpus(directory: string): Promise<Corpus> {
   }
   await walk(root);
   if (!chunks.length) throw new Error("Corpus has no indexable Markdown chunks");
-  // New recipe deliberately requires reindexing instead of mixing Python/parser identities.
+  // Recipe changes require reindexing rather than mixing extraction identities.
   return corpusSchema.parse({ recipe: JSON.stringify({ corpus: "markdown-it-15.0.2-commonmark/utf16-v2",
     embedding_model: EMBEDDING_MODEL, size_chars: CHUNK_SIZE, overlap_chars: CHUNK_OVERLAP }), chunks });
 }

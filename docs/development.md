@@ -22,4 +22,4 @@ pnpm corpus:export
 
 Shared packages never import applications. Keep Node-only imports outside the Worker dependency graph. Validate unknown provider/input values at their owning boundary; never cast away a schema mismatch. Avoid importing the full web template's server or UI infrastructure without an actual consumer.
 
-The active workspace contains no Python or Docker implementation. Previous implementations are recoverable from Git history. Local model, data and secret files are preserved. The native TypeScript extraction recipe requires an explicit reindex when upgrading an older installation.
+When changing the extraction/chunking recipe or embedding model, explicitly reindex the corpus before relying on the new output. Keep real documents and credentials in ignored local paths; use the example corpus only for smoke tests.

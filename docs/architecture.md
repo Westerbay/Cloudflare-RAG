@@ -1,6 +1,6 @@
 # Cloudflare architecture
 
-Small RAG is a TypeScript pnpm workspace with a Cloudflare Worker and Node.js operator tools. The application layout is inspired by [WebApp Template](https://github.com/Westerbay/WebApp-Template). Cloudflare Workers, Workers AI, D1 and Vectorize remain the hosted runtime; no Python environment is needed to install, test, build, index or deploy.
+Small RAG is a TypeScript pnpm workspace with a Cloudflare Worker and Node.js operator tools. The application layout is inspired by [WebApp Template](https://github.com/Westerbay/WebApp-Template). Cloudflare Workers, Workers AI, D1 and Vectorize are the hosted runtime.
 
 ## Indexing
 
@@ -49,8 +49,8 @@ Wrangler was chosen over Pulumi for this single-provider application. Source con
 
 ## Workspace boundaries
 
-The template's separation of application composition, pure rules, shared contracts and persistence is reused without introducing a web application, NestJS, PostgreSQL or a second infrastructure runtime. One application does not need Turborepo. Node's test runner covers HTTP behavior, source extraction and operator staging; strict TypeScript checks include the Worker, packages and operator scripts.
+The workspace separates application composition, pure rules, shared contracts and persistence. It contains one API application and no web chat interface. Node's test runner covers HTTP behavior, source extraction and operator staging; strict TypeScript checks include the Worker, packages and operator scripts.
 
 Core imports no framework or filesystem modules. Contracts depend on Zod and their own definitions; database owns SQL and binding types. Shared packages never import the application. The API consumes contracts/database; operator scripts compose core, contracts and Cloudflare REST access. CommonMark parsing and filesystem access stay in the Node-only exporter so they are not bundled into the Worker.
 
-The new `markdown-it-15.0.2-commonmark/utf16-v2` recipe intentionally differs from the archived Python recipe. Reindex explicitly; never reuse the previous recipe for a different parser. Source hashes, canonical relative paths, line numbers, section boundaries and deterministic IDs remain part of the citation contract. UTF-16 windows stay within the shared character budget without splitting surrogate pairs. All corpus symlinks are rejected, including directory cycles; files must be UTF-8, regular, confined and bounded. Traversal stops at 5000 entries.
+The current extraction recipe is `markdown-it-15.0.2-commonmark/utf16-v2`. Reindex explicitly when changing the recipe; never reuse a recipe identifier for a different parser. Source hashes, canonical relative paths, line numbers, section boundaries and deterministic IDs remain part of the citation contract. UTF-16 windows stay within the shared character budget without splitting surrogate pairs. All corpus symlinks are rejected, including directory cycles; files must be UTF-8, regular, confined and bounded. Traversal stops at 5000 entries.

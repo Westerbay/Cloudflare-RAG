@@ -19,4 +19,4 @@ pnpm db:migrate:remote
 
 Ingestion, deployment and secret entry are explicit separate operations. See the [deployment guide](../docs/deployment.md). Setup never upgrades billing, deletes an index, resets a database or writes a secret. Inspect existing `small-rag` resource names before applying to an account; incompatible vector settings fail instead of replacing resources.
 
-The API is a native Cloudflare Worker. No Compose stack, Caddy server, local inference service or PostgreSQL instance is part of this infrastructure.
+The API is a native Cloudflare Worker with AI, D1 and Vectorize bindings. Corpus preparation and infrastructure commands run from the local Node.js workspace.

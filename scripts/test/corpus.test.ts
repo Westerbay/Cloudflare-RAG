@@ -71,7 +71,7 @@ test("empty, invalid UTF-8, oversized sources and corpus limits fail before any 
   } finally { await cleanup(); }
 });
 
-test("native export crosses staging and repeated ingestion without Python or live services", async () => {
+test("native export crosses staging and repeated ingestion without live services", async () => {
   const { root, cleanup } = await fixture();
   const db = new SQLiteDatabase();
   let embeddings = 0;
@@ -91,12 +91,12 @@ test("native export crosses staging and repeated ingestion without Python or liv
   const config = { account_id: client.account, d1_databases: [{ database_id: "11111111-1111-4111-8111-111111111111" }],
     vectorize: [{ index_name: "test" }] };
   try {
-    await writeFile(join(root, "pi.md"), "# Pi\n\nThe Pi has 8 GB.\n");
+    await writeFile(join(root, "hosting.md"), "# Hosting\n\nD1 stores passages.\n");
     const corpus = await exportCorpus(root);
     const result = await publishCorpus(client, config, corpus);
     assert.equal(result.unchanged, false);
     const stored = db.sqlite.prepare("SELECT content,line_start,line_end FROM chunks").get();
-    assert.deepEqual({ ...stored }, { content: "Pi\n\nThe Pi has 8 GB.", line_start: 1, line_end: 3 });
+    assert.deepEqual({ ...stored }, { content: "Hosting\n\nD1 stores passages.", line_start: 1, line_end: 3 });
     assert.equal((await publishCorpus(client, config, await exportCorpus(root))).unchanged, true);
     assert.equal(embeddings, 1);
   } finally { db.sqlite.close(); await cleanup(); }

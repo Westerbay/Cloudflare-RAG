@@ -1,6 +1,6 @@
 # Deploy Small RAG to Cloudflare
 
-The target is Cloudflare Workers Free, Workers AI, D1 and Vectorize. There is no VM, GPU rental, Container subscription or PostgreSQL server. `workers.dev` supplies an HTTPS address without purchasing a domain. These instructions create remote state only when you run the explicitly marked remote commands.
+The target is Cloudflare Workers Free, Workers AI, D1 and Vectorize. The Worker executes the API, Workers AI runs inference, and D1/Vectorize store the index. `workers.dev` supplies an HTTPS address without purchasing a domain. These instructions create remote state only when you run the explicitly marked remote commands.
 
 ## Prerequisites
 
@@ -15,19 +15,36 @@ Tests use SQLite and fake AI/Vectorize bindings; the build is Wrangler's deploym
 
 ## Operator credentials
 
-Create a Cloudflare account and keep its Workers plan on **Free**. Obtain the account ID and an API token scoped to that account with **D1 Edit**, **Vectorize Write** and **Workers AI Read** permissions for resource setup and ingestion. Wrangler deployment and Worker-secret management additionally need **Workers Scripts Edit** (and the account read permissions required by Wrangler); alternatively authenticate Wrangler separately with its interactive `login` command. Use a scoped API token rather than a Global API Key. Permission names and availability should be checked in the current Cloudflare dashboard.
+Create a Cloudflare account and keep its Workers plan on **Free**. In the dashboard, open **Workers AI → Use REST API** and copy the **Account ID** (a 32-character identifier). It identifies your account; it is not an API token. See [Cloudflare’s account/token guide](https://developers.cloudflare.com/workers-ai/get-started/rest-api/).
 
-Supply public identifiers and secrets in your shell or secret manager. This interactive example keeps the token out of the typed command history:
+Create a custom token in **My Profile → API Tokens**. Use **Account** as the scope for every permission row:
 
-```sh
+| Service | Access | Purpose |
+| --- | --- | --- |
+| D1 | Edit | Create the database, apply migrations and store passages |
+| Vectorize | Edit | Create the index and publish vectors |
+| Workers AI | Read and Edit (two rows) | Run embedding models during ingestion |
+| Workers Scripts | Edit | Deploy the Worker and configure its secret |
+| Account Settings | Read | Allow Wrangler to read account information |
+
+Under **Account Resources**, choose **Include → Specific account → your account**, instead of all accounts. Use a scoped API token rather than a Global API Key. Cloudflare’s [Workers AI REST guide](https://developers.cloudflare.com/workers-ai/get-started/rest-api/) requires both AI permissions; consult the [permission reference](https://developers.cloudflare.com/fundamentals/api/reference/permissions/) if dashboard labels differ. Wrangler login alone does not supply the environment token required by this repository’s setup/index scripts.
+
+Supply public identifiers and secrets in your shell or secret manager. These interactive examples keep the token out of the typed command history. For **zsh**:
+
+```zsh
 export CLOUDFLARE_ACCOUNT_ID='YOUR_32_CHARACTER_ACCOUNT_ID'
-printf 'Cloudflare API token: '
-read -r -s CLOUDFLARE_API_TOKEN
+read -rs 'CLOUDFLARE_API_TOKEN?Cloudflare API token: '
 printf '\n'
 export CLOUDFLARE_API_TOKEN
 ```
 
-Never paste the token into a chat, commit it, or put it in Wrangler `vars`. The scripts do not read secret files or print provider error bodies. The deployed Worker uses its AI/D1/Vectorize bindings and does not need this operator API token.
+For **Bash**, use this input command instead of the zsh `read` line:
+
+```bash
+read -r -s -p 'Cloudflare API token: ' CLOUDFLARE_API_TOKEN
+```
+
+The variables apply to the current terminal session. Never paste the token into a chat, commit it, or put it in Wrangler `vars`. The scripts do not read secret files or print provider error bodies. The deployed Worker uses its AI/D1/Vectorize bindings and does not need this operator API token.
 
 ## Infrastructure setup
 
@@ -50,9 +67,26 @@ Generated account and database identifiers go into ignored `infra/wrangler.local
 
 D1 schema changes live in `packages/database/migrations/`. `pnpm db:migrate:local` uses only the local Wrangler database; `pnpm db:migrate:remote` changes the configured Cloudflare D1 database. Do not point that configuration at a shared or production database without reviewing the exact target and migration.
 
+## Prepare the corpus locally
+
+`examples/corpus` contains small smoke-test fixtures about the application. It is not a reviewed production knowledge base. Before uploading real documents:
+
+1. Define the subject, intended audience and questions the bot must answer.
+2. Select authoritative, current sources that you are allowed to send to Cloudflare; remove secrets and unrelated personal information.
+3. Put UTF-8 `.md` or `.markdown` files in ignored `data/corpus/` (or another private local directory). Use meaningful filenames and headings, and record source links and review dates in the documents.
+4. Remove contradictory or obsolete claims and collect representative questions, expected source passages, and questions the corpus cannot answer. Keep this evaluation material outside the indexed folder.
+5. Preview the extraction locally:
+
+```sh
+pnpm corpus:index --corpus data/corpus
+pnpm corpus:export --corpus data/corpus
+```
+
+Both commands stay local. Export prints the actual passages, paths and line ranges for review. The current profile allows up to 100 files, 2,000,000 bytes per file and 1000 chunks. This is a Markdown pipeline; it does not extract PDFs, browse source URLs or fetch linked pages. Local preparation can happen before any Cloudflare setup. Run `--apply` only after reviewing this output.
+
 ## Index and deploy
 
-Preview the example corpus and then publish it:
+For an intentional smoke test using only the example fixtures, preview and then publish:
 
 ```sh
 pnpm corpus:index
@@ -63,7 +97,7 @@ node infra/wrangler.ts secret put BASIC_AUTH_PASSWORD
 
 Choose a strong Basic Auth password of at least 16 characters when prompted; the username is `rag`. Until the secret is configured, every route returns 503. Configure the secret only through Wrangler or the Cloudflare dashboard, not as a committed plain-text variable. All password holders can query the whole corpus. There is no public ingestion route or per-document authorization.
 
-For your own Markdown files, use `--corpus data/corpus` with the indexing command. The default is `examples/corpus`. The exporter confines paths to the chosen corpus, rejects oversized documents and limits input to 100 documents and 1000 chunks. Preview commands do not send source text anywhere. `--apply` sends passages to Workers AI, D1 and Vectorize; the Cloudflare account is the processing destination.
+For your reviewed real corpus, replace the two indexing commands above with `pnpm corpus:index --corpus data/corpus` and then `pnpm corpus:index --corpus data/corpus --apply`. The default is `examples/corpus`. The exporter confines paths to the chosen corpus, rejects oversized documents and limits input to 100 documents and 1000 chunks. Preview commands do not send source text anywhere. `--apply` sends passages to Workers AI, D1 and Vectorize; the Cloudflare account is the processing destination.
 
 Ingestion is generation-based: a failure leaves the old active index available. It does not delete old or failed generations. Run only one ingestion job per index at a time. Each generation needs additional stored vector dimensions; the script checks this index's current vector count before staging, and refuses to exceed five million stored dimensions. Other indexes also share the account's allowance and must be considered separately. Do not repeatedly rebuild large corpora without checking retained versions and the dashboard. Cleanup or replacing an index is a separate, explicitly reviewed operation.
 
@@ -73,20 +107,20 @@ Wrangler prints the deployed URL. Replace the placeholder below:
 curl -u rag https://small-rag.YOUR-SUBDOMAIN.workers.dev/health/ready
 curl -u rag https://small-rag.YOUR-SUBDOMAIN.workers.dev/v1/chat \
   -H 'Content-Type: application/json' \
-  -d '{"message":"What does the corpus say about the Raspberry Pi?","history":[]}'
+  -d '{"message":"Which services store the passages and embeddings?","history":[]}'
 ```
 
 The password is prompted. Readiness checks the D1 active generation and embedding model and the Vectorize dimensions, without consuming inference. Cosine configuration is checked at setup. Readiness does not verify hosted-model availability or remaining AI quota: a later chat can still enter sleep if Cloudflare is unavailable, out of capacity or out of free allocation. Readiness returns the same cached sleep response once a binding failure has been observed; liveness stays available.
 
 ## Free-tier boundaries
 
-As checked on 2026-10-15, the [Workers AI free allocation](https://developers.cloudflare.com/workers-ai/platform/pricing/) is 10,000 neurons per UTC day, [Vectorize Free](https://developers.cloudflare.com/vectorize/platform/pricing/) includes five million stored and thirty million queried dimensions per month, and [D1 Free](https://developers.cloudflare.com/d1/platform/pricing/) has its own row and storage allowances. [Workers Free](https://developers.cloudflare.com/workers/platform/limits/) also limits requests and CPU time. These limits are account-wide, can change, and do not imply an uptime or latency guarantee.
+As checked on 2026-10-16, the [Workers AI free allocation](https://developers.cloudflare.com/workers-ai/platform/pricing/) is 10,000 neurons per UTC day, [Vectorize Free](https://developers.cloudflare.com/vectorize/platform/pricing/) allows five million stored dimensions and thirty million queried dimensions per month, and [D1 Free](https://developers.cloudflare.com/d1/platform/pricing/) has its own row and storage allowances. [Workers Free](https://developers.cloudflare.com/workers/platform/limits/) also limits requests and CPU time. These limits are account-wide, can change, and do not imply an uptime or latency guarantee.
 
 Keep the account on Workers Free and do not configure AI Gateway prepaid billing. The scripts only use free-tier-eligible products; they neither verify nor change your current subscription. **There is no application spending cap: an already paid account can bill overages instead of rejecting usage.** Check the account plan before applying. Indexing and other account applications also consume allocations. A provider hard limit stops service when its allocation is exhausted; do not upgrade automatically to recover availability.
 
-The fixed generation model is the currently listed `@cf/meta/llama-3.1-8b-instruct-fp8`, not the older `-fp8-fast` identifier used in an earlier cost illustration. Its [model page](https://developers.cloudflare.com/workers-ai/models/llama-3.1-8b-instruct-fp8/) lists $0.152/M input tokens and $0.287/M output tokens outside included usage. The earlier cheaper-model estimate must not be treated as this deployment's tariff. The account must still have access to the model. Changing model IDs is a reviewed code change; no paid-only model or provider fallback is selected dynamically.
+The fixed generation model is the currently listed `@cf/meta/llama-3.1-8b-instruct-fp8`. Its [model page](https://developers.cloudflare.com/workers-ai/models/llama-3.1-8b-instruct-fp8/) lists $0.152/M input tokens and $0.287/M output tokens outside included usage. The account must still have access to the model. Changing model IDs is a reviewed code change; no paid-only model or provider fallback is selected dynamically.
 
-The backend has no manual daily question counter. `DAILY_QUESTION_LIMIT` is obsolete and unused; remove it from any previously generated configuration on your next setup. The historical `daily_usage` table is left untouched to preserve applied migrations and existing data.
+The backend has no manual daily question counter. The unused `daily_usage` table remains in the original migration for compatibility; it does not enforce a runtime quota.
 
 A binding failure returns HTTP 503 with `status: "sleeping"`, `service`, `reason`, `retry_at` and `Retry-After`. Workers AI code 3036 and documented D1 daily-row exhaustion messages additionally provide `reset_at` at the next 00:00 UTC. Other failures, including AI capacity errors and Vectorize errors with no reliable reset signal, pause for one minute before a new request may test availability. That probe time is not a promise of recovery. See [Workers AI errors](https://developers.cloudflare.com/workers-ai/platform/errors/) and [D1 errors](https://developers.cloudflare.com/d1/observability/debug-d1/).
 
@@ -98,7 +132,7 @@ There is no background polling, streaming, automatic generation retry or failed-
 
 After provisioning/indexing, `pnpm dev` executes the handler locally with remote D1, Vectorize and AI bindings. **It queries real data, consumes real AI allocation and shares the account’s Cloudflare allocations.** Do not use it as an isolated production sandbox. For independent development use a separate Cloudflare account/resources and generated configuration, with the same Free-plan checks.
 
-If upgrading an existing checkout, rerun `pnpm infra:setup --apply` before deployment to refresh the non-secret generated entrypoint and migration paths; this only reuses the existing named resources. The migration filenames and SQL behavior are preserved, so moving their source directory does not create a new migration. Reindex explicitly with the native TypeScript extraction recipe before relying on the new corpus output.
+When updating the portable infrastructure template, rerun `pnpm infra:setup --apply` before deployment to refresh the generated configuration. Setup reuses compatible named resources. Review versioned migrations separately; setup does not apply them.
 
 Set the local HTTP password in ignored `infra/.dev.vars`, using `BASIC_AUTH_PASSWORD` and a value of at least 16 characters, before running `pnpm dev`. This is an operator-created secret file; the repository does not create it. Do not copy the operator API token into it. Cloudflare AI and Vectorize require authenticated remote access; there is no offline inference emulator. Use `pnpm test` and `pnpm db:migrate:local` when you need an account-free check.
 
@@ -106,6 +140,6 @@ Set the local HTTP password in ignored `infra/.dev.vars`, using `BASIC_AUTH_PASS
 
 Keep the Markdown corpus outside Git when private and back it up separately. The D1 and Vectorize data can be rebuilt from it with the configured extractor and embedding model. Retained generations are not a substitute for a database backup. Review Cloudflare D1 backup/export procedures before production changes.
 
-Deploy prompt/code edits with `pnpm build` followed by the explicit `pnpm deploy`. Reindex only when the corpus, extractor/chunk recipe or embedding model changes. A prompt-only change does not require reindexing. The old PostgreSQL corpus/index remains separate; none of these commands connects to or migrates it.
+Deploy prompt/code edits with `pnpm build` followed by the explicit `pnpm deploy`. Reindex only when the corpus, extractor/chunk recipe or embedding model changes. A prompt-only change does not require reindexing.
 
-No live Cloudflare deployment or inference benchmark is implied by passing local tests. Verify authentication, readiness, quota behavior, citations, real-corpus answer quality, account usage and latency after configuring your own account. Previous local-inference implementations and benchmark reports are recoverable from Git history.
+No live Cloudflare deployment or inference benchmark is implied by passing local tests. Verify authentication, readiness, quota behavior, citations, real-corpus answer quality, account usage and latency after configuring your own account. Performance depends on the selected models, account and corpus.
