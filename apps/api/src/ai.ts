@@ -60,17 +60,12 @@ export async function generateAnswer(
   })));
   if (refusalRequired && value.status !== "insufficient_context") throw new Error("Invalid refusal status");
   const chosen = new Map(evidence.map(item => [item.id, item]));
-  const aliases: string[] = [];
-  for (const id of value.citations) {
-    if (!chosen.has(id)) throw new Error("Unknown citation");
-    if (!aliases.includes(id)) aliases.push(id);
-  }
-  if ((value.status === "answered" && aliases.length === 0)
-      || (value.status !== "answered" && aliases.length !== 0)) throw new Error("Invalid citation status");
-  const citations = aliases.map(id => {
+  const citations = [...new Set(value.citations)].map(id => {
     const item = chosen.get(id);
-    if (!item) throw new Error("Missing citation");
+    if (!item) throw new Error("Unknown citation");
     return { chunk_id: item.chunk_id, path: item.path, line_start: item.lines[0], line_end: item.lines[1] };
   });
+  if ((value.status === "answered" && citations.length === 0)
+      || (value.status !== "answered" && citations.length !== 0)) throw new Error("Invalid citation status");
   return { status: value.status, answer: value.answer.trim(), citations };
 }

@@ -45,7 +45,7 @@ export async function publishCorpus(client: CloudflareClient, rawConfig: unknown
     return { generation: active[0].id, chunks: corpus.chunks.length, unchanged: true };
   }
   const info = indexInfoSchema.parse(await client.call(`/vectorize/v2/indexes/${vectorIndex}/info`));
-  if (info.dimensions !== DIMENSIONS || !Number.isInteger(info.vectorCount)) throw new Error("Incompatible Vectorize index info");
+  if (info.dimensions !== DIMENSIONS) throw new Error("Incompatible Vectorize index info");
   if ((info.vectorCount + corpus.chunks.length) * DIMENSIONS > 5_000_000) {
     throw new Error("Staging another generation would exceed the free stored-dimensions allowance; retain the active index and review old generations manually");
   }

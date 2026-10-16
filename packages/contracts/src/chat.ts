@@ -2,7 +2,7 @@ import { z } from "zod";
 import { MAX_MESSAGE_CHARS, MAX_HISTORY_TURNS, MAX_HISTORY_CHARS } from "./config.ts";
 
 const nonblank = z.string().refine(value => value.trim().length > 0, "Text must not be blank");
-export const turnSchema = z.strictObject({ role: z.enum(["user", "assistant"]), content: nonblank });
+const turnSchema = z.strictObject({ role: z.enum(["user", "assistant"]), content: nonblank });
 export const chatInputSchema = z.strictObject({
   message: nonblank.max(MAX_MESSAGE_CHARS),
   history: z.array(turnSchema).max(MAX_HISTORY_TURNS).nullish().transform(value => value ?? []),

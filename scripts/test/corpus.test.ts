@@ -35,7 +35,7 @@ test("export is stable, source-linked, ordered and changes identity after a sour
     assert.equal(first.chunks[0].text, "Guide\n\nA fact.");
     assert.deepEqual([first.chunks[0].line_start, first.chunks[0].line_end], [1, 3]);
     assert.match(first.chunks[0].chunk_id, /^[a-f0-9]{64}$/);
-    assert.match(first.recipe, /markdown-it-15.0.2-commonmark\/utf16-v1/);
+    assert.match(first.recipe, /markdown-it-15.0.2-commonmark\/utf16-v2/);
     await writeFile(join(root, "nested", "guide.MD"), "# Guide\n\nA changed fact.\n");
     assert.notEqual((await exportCorpus(root)).chunks[0].chunk_id, first.chunks[0].chunk_id);
   } finally { await cleanup(); }
@@ -100,4 +100,14 @@ test("native export crosses staging and repeated ingestion without Python or liv
     assert.equal((await publishCorpus(client, config, await exportCorpus(root))).unchanged, true);
     assert.equal(embeddings, 1);
   } finally { db.sqlite.close(); await cleanup(); }
+});
+
+test("skipped Markdown heading levels keep siblings out of each other's ancestry", () => {
+  const blocks = extractBlocks("# Guide\n\n### First\n\nOne.\n\n### Second\n\nTwo.\n\n## Parent\n\n#### Child\n\nThree.\n\n## Replacement\n\nFour.\n");
+  assert.deepEqual(blocks.map(block => [block.text, block.heading]), [
+    ["Guide", "Guide"], ["First", "Guide > First"], ["One.", "Guide > First"],
+    ["Second", "Guide > Second"], ["Two.", "Guide > Second"],
+    ["Parent", "Guide > Parent"], ["Child", "Guide > Parent > Child"], ["Three.", "Guide > Parent > Child"],
+    ["Replacement", "Guide > Replacement"], ["Four.", "Guide > Replacement"],
+  ]);
 });

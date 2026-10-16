@@ -16,17 +16,19 @@ const MAX_ENTRIES = 5000;
 
 export function extractBlocks(content: string): ExtractedBlock[] {
   const tokens = parser.parse(content, {});
-  const headings: string[] = [], blocks: ExtractedBlock[] = [];
+  const headings: { level: number; title: string }[] = [];
+  const blocks: ExtractedBlock[] = [];
   for (let index = 0; index < tokens.length; index++) {
     const token = tokens[index];
     if (token.type === "heading_open") {
-      headings.splice(Number(token.tag.slice(1)) - 1);
-      headings.push(plainText(tokens[index + 1]));
+      const level = Number(token.tag.slice(1));
+      while (headings.length && headings[headings.length - 1].level >= level) headings.pop();
+      headings.push({ level, title: plainText(tokens[index + 1]) });
     }
     if (!["inline", "fence", "code_block"].includes(token.type) || !token.map) continue;
     const text = plainText(token);
     if (text) blocks.push({ text, line_start: token.map[0] + 1, line_end: token.map[1],
-      heading: headings.join(" > ") || null });
+      heading: headings.map(heading => heading.title).join(" > ") || null });
   }
   return blocks;
 }
@@ -87,6 +89,6 @@ export async function exportCorpus(directory: string): Promise<Corpus> {
   await walk(root);
   if (!chunks.length) throw new Error("Corpus has no indexable Markdown chunks");
   // New recipe deliberately requires reindexing instead of mixing Python/parser identities.
-  return corpusSchema.parse({ recipe: JSON.stringify({ corpus: "markdown-it-15.0.2-commonmark/utf16-v1",
+  return corpusSchema.parse({ recipe: JSON.stringify({ corpus: "markdown-it-15.0.2-commonmark/utf16-v2",
     embedding_model: EMBEDDING_MODEL, size_chars: CHUNK_SIZE, overlap_chars: CHUNK_OVERLAP }), chunks });
 }

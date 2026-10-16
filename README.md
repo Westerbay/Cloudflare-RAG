@@ -59,6 +59,7 @@ curl -u rag https://small-rag.YOUR-SUBDOMAIN.workers.dev/v1/chat \
 There is no local question quota. When a Cloudflare binding fails, the API returns HTTP 503 with `status: "sleeping"`, the affected `service`, and `Retry-After`. Recognized Workers AI daily-allocation errors and D1 daily-row-limit errors pause requests until **00:00 UTC**, exposed as `reset_at`. Other failures pause for one minute; `retry_at` indicates when a new request may probe availability, not a promised quota reset. There is no background polling or automatic retry of the failed question.
 
 The pause is cached per Worker isolate, without requiring D1 writes. While cached, chat and readiness calls skip all downstream bindings; authenticated liveness stays available. New isolates and already-running requests may still reach Cloudflare, which enforces the account-wide limits. If the Workers request quota itself is exhausted, Cloudflare can reject the request before our handler runs. Monthly quotas may need a monthly reset; storage limits require operator action, not waiting until tomorrow. Stay on Workers Free for provider-enforced free limits: a paid account can continue billing instead of reporting exhaustion. Indexing and development calls consume the same account allocations.
+
 The free-tier profile accepts up to 1500 characters per question, four history turns totalling 2000 characters, a 16 KiB request body, 3000 evidence characters and 200 generated tokens. Oversized input is rejected instead of silently truncated. Evidence is bounded before generation. Invalid model output, unknown citations, absent indexes and provider outages fail closed with HTTP 503.
 
 ## Index your documents
@@ -72,10 +73,11 @@ pnpm corpus:index --corpus data/corpus --apply
 
 Only `.md` and `.markdown` files are read. The operator profile allows up to 100 files and 1000 chunks. It sends passages to Workers AI for embedding and stores them in D1; queries and selected passages are also processed by Cloudflare. There is no public ingestion endpoint. Unchanged corpora are detected before new embeddings are requested. Indexing stages a new generation and waits for the Vectorize mutation before activating it in D1. Run only one indexing job per index at a time.
 
-Edit `prompts/system.md` for the mission and JSON contract and `prompts/SOUL.md` for style, then rebuild/deploy. Prompt edits do not require reindexing. The native TypeScript extractor has a new versioned recipe: run an explicit reindex after migrating from Python. Switching the embedding model or extraction/chunking recipe also requires reindexing; the existing PostgreSQL index is not migrated or mixed with Cloudflare embeddings.
+Edit `prompts/system.md` for the mission and JSON contract and `prompts/SOUL.md` for style, then rebuild/deploy. Prompt edits do not require reindexing. The native TypeScript extractor has a new versioned recipe: run an explicit reindex after migrating from Python. Switching the embedding model or extraction/chunking recipe also requires reindexing; existing vectors are not mixed with a different embedding model.
 
-## Development and historical backend
+## Development
 
 `pnpm dev` runs the Worker handler locally but uses **remote AI, Vectorize and D1 bindings** after setup. It accesses real indexed documents and the same Cloudflare allocations. Configure its local Basic Auth secret as described in the [development guide](docs/deployment.md#local-development). AI and Vectorize are not offline emulators. Use `pnpm test` for offline behavior checks.
 
-The previous Python/FastAPI + PostgreSQL/pgvector + llama.cpp implementation is retained as an inactive archive in `src/small_rag/`, `database/`, the Compose files and `scripts/benchmark_*.py`. It is **not the Cloudflare runtime**. See [legacy deployment](docs/legacy-deployment.md) and [historical Pi measurements](docs/performance.md). These archives are excluded from the pnpm workspace and its checks; old Python commands are not part of the supported setup. No existing database, model file, container or Git history is deleted by this migration.
+
+The repository contains only the active Cloudflare implementation. Older Python, local-model and Compose implementations remain recoverable from Git history; local ignored data, model files and secrets are not modified by source cleanup.

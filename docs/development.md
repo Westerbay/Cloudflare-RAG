@@ -22,4 +22,4 @@ pnpm corpus:export
 
 Shared packages never import applications. Keep Node-only imports outside the Worker dependency graph. Validate unknown provider/input values at their owning boundary; never cast away a schema mismatch. Avoid importing the full web template's server or UI infrastructure without an actual consumer.
 
-The previous Python tools, tests, Compose deployment, PostgreSQL SQL and `legacy/package-lock.json` are inactive historical material. They are not required or run by any pnpm command, and their former setup remains documented only in the legacy guides. No local model, data file or secret is removed. The TypeScript parser recipe requires a new explicit corpus indexing run.
+The active workspace contains no Python or Docker implementation. Previous implementations are recoverable from Git history. Local model, data and secret files are preserved. The native TypeScript extraction recipe requires an explicit reindex when upgrading an older installation.
