@@ -108,4 +108,4 @@ Keep the Markdown corpus outside Git when private and back it up separately. The
 
 Deploy prompt/code edits with `pnpm build` followed by the explicit `pnpm deploy`. Reindex only when the corpus, extractor/chunk recipe or embedding model changes. A prompt-only change does not require reindexing. The old PostgreSQL corpus/index remains separate; none of these commands connects to or migrates it.
 
-No live Cloudflare deployment or inference benchmark is implied by passing local tests. Verify authentication, readiness, quota behavior, citations, real-corpus answer quality, account usage and latency after configuring your own account. The prior Raspberry Pi and Docker guides are archived in [legacy-deployment.md](legacy-deployment.md); the [performance report](performance.md) records historical local-inference measurements.
+No live Cloudflare deployment or inference benchmark is implied by passing local tests. Verify authentication, readiness, quota behavior, citations, real-corpus answer quality, account usage and latency after configuring your own account. Previous local-inference implementations and benchmark reports are recoverable from Git history.

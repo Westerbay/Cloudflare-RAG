@@ -1,6 +1,0 @@
-{$RAG_DOMAIN} {
-	basic_auth {
-		rag {$RAG_BASIC_AUTH_HASH}
-	}
-	reverse_proxy api:8000
-}

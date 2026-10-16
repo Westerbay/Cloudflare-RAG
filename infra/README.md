@@ -19,4 +19,4 @@ pnpm db:migrate:remote
 
 Ingestion, deployment and secret entry are explicit separate operations. See the [deployment guide](../docs/deployment.md). Setup never upgrades billing, deletes an index, resets a database or writes a secret. Inspect existing `small-rag` resource names before applying to an account; incompatible vector settings fail instead of replacing resources.
 
-The `compose*.yml` files and `Caddyfile` are the **legacy local Python/PostgreSQL/llama.cpp stack**. They are retained to preserve earlier work and benchmarks, and are not used by the Cloudflare deployment. See [legacy-deployment.md](../docs/legacy-deployment.md) for that historical path. Do not use its Docker commands to configure the Worker.
+The API is a native Cloudflare Worker. No Compose stack, Caddy server, local inference service or PostgreSQL instance is part of this infrastructure.

@@ -28,7 +28,7 @@ export async function provision(client: CloudflareClient, rawTemplate: unknown) 
   const rawIndex = await client.call(path, { allowNotFound: true });
   const index = rawIndex === null ? null : indexSchema.parse(rawIndex);
   if (index) {
-    if (index.config?.dimensions !== DIMENSIONS || index.config?.metric !== "cosine") {
+    if (index.config.dimensions !== DIMENSIONS || index.config.metric !== "cosine") {
       throw new Error("Existing Vectorize index has incompatible dimensions or metric; it was not replaced");
     }
   } else {

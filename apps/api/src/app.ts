@@ -6,7 +6,7 @@ import { embed, generateAnswer } from "./ai.ts";
 import { ServiceAvailability, ServiceSleeping } from "./availability.ts";
 import {
   similarityThreshold, DIMENSIONS, EMBEDDING_MODEL, MAX_BODY_BYTES,
-  MAX_EVIDENCE_CHARS, MAX_HISTORY_CHARS, MAX_HISTORY_TURNS, MAX_MESSAGE_CHARS, TOP_K,
+  MAX_EVIDENCE_CHARS, TOP_K,
 } from "@small-rag/contracts/config";
 
 // Reused bindings share a pause within this isolate; no dependency on writable D1.
@@ -78,11 +78,10 @@ async function activeGeneration(db: Database, availability: ServiceAvailability,
   return row.id;
 }
 
-async function retrieve(env: Env, input: ChatInput, generation: string, availability: ServiceAvailability, clock: () => number): Promise<Evidence[]> {
+async function retrieve(env: Env, input: ChatInput, generation: string, threshold: number, availability: ServiceAvailability, clock: () => number): Promise<Evidence[]> {
   const vector = await embed(env.AI, input.message);
   const matches = await availability.run("vectorize", () =>
     env.VECTORS.query(vector, { topK: TOP_K, namespace: generation, returnMetadata: "none" }), clock);
-  const threshold = similarityThreshold(env.MIN_SIMILARITY);
   const evidence: Evidence[] = [];
   let remaining = MAX_EVIDENCE_CHARS;
   const seen = new Set<string>();
@@ -139,8 +138,8 @@ export async function handleRequest(request: Request, env: Env, prompt: string, 
     const input = await parseInput(request);
     services.check(clock());
     const generation = await activeGeneration(env.DB, services, clock);
-    similarityThreshold(env.MIN_SIMILARITY);
-    const evidence = await retrieve(bindings, input, generation, services, clock);
+    const threshold = similarityThreshold(env.MIN_SIMILARITY);
+    const evidence = await retrieve(bindings, input, generation, threshold, services, clock);
     return json(await generateAnswer(bindings.AI, prompt, input, evidence));
   } catch (error) {
     if (error instanceof RequestError) return json({ detail: error.message }, error.status);
