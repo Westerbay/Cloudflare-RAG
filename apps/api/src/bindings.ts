@@ -16,4 +16,6 @@ export interface Env {
   VECTORS: VectorBinding;
   BASIC_AUTH_PASSWORD?: string;
   MIN_SIMILARITY?: string;
+  PUBLIC_CHAT_ENABLED?: string;
+  PUBLIC_CHAT_ORIGINS?: string;
 }

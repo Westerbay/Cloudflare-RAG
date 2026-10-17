@@ -12,6 +12,8 @@ pnpm corpus:export
 
 `check` runs strict type checking, all active tests and Wrangler's deployment dry run. `infra:setup` and `corpus:index` are plans without `--apply`. `corpus:export` writes JSON to standard output without provider access. Local development with `pnpm dev` needs configured remote AI/D1/Vectorize bindings; see [deployment](deployment.md). Secrets and remote operations remain explicit.
 
+Public/private access and CORS tests call the Worker handler directly with SQLite in memory and simulated bindings. They need no real password or Cloudflare account. Use `pnpm test` for this validation, not `pnpm dev`. Public mode remains opt-in; its configuration and private health routes are described in [public browser access](deployment.md#public-browser-access).
+
 - `apps/api/src`: Worker entrypoint, HTTP/auth, retrieval and Cloudflare adapters.
 - `packages/contracts/src`: shared Zod schemas, inferred input types and profile settings.
 - `packages/core/src`: pure source-window rules, independent of Node and providers.
@@ -22,4 +24,4 @@ pnpm corpus:export
 
 Shared packages never import applications. Keep Node-only imports outside the Worker dependency graph. Validate unknown provider/input values at their owning boundary; never cast away a schema mismatch. Avoid importing the full web template's server or UI infrastructure without an actual consumer.
 
-When changing the extraction/chunking recipe or embedding model, explicitly reindex the corpus before relying on the new output. Keep real documents and credentials in ignored local paths; use the example corpus only for smoke tests.
+When changing the extraction/chunking recipe, embedding-input representation or embedding model, re-export and explicitly reindex the corpus before relying on the new output. Keep real documents and credentials in ignored local paths; use the example corpus only for smoke tests. Query-mode and prompt-only edits require deployment but not reindexing.

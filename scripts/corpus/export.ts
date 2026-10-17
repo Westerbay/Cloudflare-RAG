@@ -6,31 +6,49 @@ import MarkdownIt from "markdown-it";
 import { chunkBlocks } from "@small-rag/core/chunking";
 import type { ExtractedBlock } from "@small-rag/core/chunking";
 import { CHUNK_SIZE, CHUNK_OVERLAP, MAX_DOCUMENT_BYTES, MAX_DOCUMENTS, MAX_CHUNKS,
-  corpusSchema } from "@small-rag/contracts/corpus";
+  EMBEDDING_RECIPE, EXTRACTION_RECIPE, corpusSchema } from "@small-rag/contracts/corpus";
 import type { Corpus } from "@small-rag/contracts/corpus";
 import { EMBEDDING_MODEL } from "@small-rag/contracts/config";
 
 const parser = new MarkdownIt("commonmark");
 const hash = (text: string | Uint8Array) => createHash("sha256").update(text).digest("hex");
 const MAX_ENTRIES = 5000;
+interface Section {
+  blocks: ExtractedBlock[];
+  hasBody: boolean;
+  hasDescendantBody: boolean;
+}
 
 export function extractBlocks(content: string): ExtractedBlock[] {
   const tokens = parser.parse(content, {});
-  const headings: { level: number; title: string }[] = [];
-  const blocks: ExtractedBlock[] = [];
+  const headings: { level: number; title: string; section: Section }[] = [];
+  let section: Section = { blocks: [], hasBody: false, hasDescendantBody: false };
+  const sections = [section];
   for (let index = 0; index < tokens.length; index++) {
     const token = tokens[index];
     if (token.type === "heading_open") {
       const level = Number(token.tag.slice(1));
       while (headings.length && headings[headings.length - 1].level >= level) headings.pop();
-      headings.push({ level, title: plainText(tokens[index + 1]) });
+      section = { blocks: [], hasBody: false, hasDescendantBody: false };
+      sections.push(section);
+      headings.push({ level, title: plainText(tokens[index + 1]), section });
     }
     if (!["inline", "fence", "code_block"].includes(token.type) || !token.map) continue;
     const text = plainText(token);
-    if (text) blocks.push({ text, line_start: token.map[0] + 1, line_end: token.map[1],
+    if (!text) continue;
+    if (tokens[index - 1]?.type !== "heading_open") {
+      section.hasBody = true;
+      for (const heading of headings) {
+        if (heading.section !== section) heading.section.hasDescendantBody = true;
+      }
+    }
+    section.blocks.push({ text, line_start: token.map[0] + 1, line_end: token.map[1],
       heading: headings.map(heading => heading.title).join(" > ") || null });
   }
-  return blocks;
+  // Empty parents already label their descendants. Keep standalone leaf facts
+  // and titles with body text; only the redundant parent-only vectors disappear.
+  return sections.filter(section => section.hasBody || !section.hasDescendantBody)
+    .flatMap(section => section.blocks);
 }
 
 function plainText(token: { content: string; children: { type: string; content: string }[] | null }): string {
@@ -89,6 +107,7 @@ export async function exportCorpus(directory: string): Promise<Corpus> {
   await walk(root);
   if (!chunks.length) throw new Error("Corpus has no indexable Markdown chunks");
   // Recipe changes require reindexing rather than mixing extraction identities.
-  return corpusSchema.parse({ recipe: JSON.stringify({ corpus: "markdown-it-15.0.2-commonmark/utf16-v2",
-    embedding_model: EMBEDDING_MODEL, size_chars: CHUNK_SIZE, overlap_chars: CHUNK_OVERLAP }), chunks });
+  return corpusSchema.parse({ recipe: JSON.stringify({ corpus: EXTRACTION_RECIPE,
+    embedding_model: EMBEDDING_MODEL, embedding_recipe: EMBEDDING_RECIPE,
+    size_chars: CHUNK_SIZE, overlap_chars: CHUNK_OVERLAP }), chunks });
 }

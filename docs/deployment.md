@@ -95,7 +95,7 @@ pnpm deploy
 node infra/wrangler.ts secret put BASIC_AUTH_PASSWORD
 ```
 
-Choose a strong Basic Auth password of at least 16 characters when prompted; the username is `rag`. Until the secret is configured, every route returns 503. Configure the secret only through Wrangler or the Cloudflare dashboard, not as a committed plain-text variable. All password holders can query the whole corpus. There is no public ingestion route or per-document authorization.
+Choose a strong Basic Auth password of at least 16 characters when prompted; the username is `rag`. Protected routes return 503 until the secret is configured; all routes are protected in the default private mode. Configure the secret only through Wrangler or the Cloudflare dashboard, not as a committed plain-text variable. All password holders can query the whole corpus. There is no public ingestion route or per-document authorization.
 
 For your reviewed real corpus, replace the two indexing commands above with `pnpm corpus:index --corpus data/corpus` and then `pnpm corpus:index --corpus data/corpus --apply`. The default is `examples/corpus`. The exporter confines paths to the chosen corpus, rejects oversized documents and limits input to 100 documents and 1000 chunks. Preview commands do not send source text anywhere. `--apply` sends passages to Workers AI, D1 and Vectorize; the Cloudflare account is the processing destination.
 
@@ -111,6 +111,23 @@ curl -u rag https://small-rag.YOUR-SUBDOMAIN.workers.dev/v1/chat \
 ```
 
 The password is prompted. Readiness checks the D1 active generation and embedding model and the Vectorize dimensions, without consuming inference. Cosine configuration is checked at setup. Readiness does not verify hosted-model availability or remaining AI quota: a later chat can still enter sleep if Cloudflare is unavailable, out of capacity or out of free allocation. Readiness returns the same cached sleep response once a binding failure has been observed; liveness stays available.
+
+## Public browser access
+
+The portable template keeps `PUBLIC_CHAT_ENABLED` at `"false"`. After reviewing the entire corpus for public access, an operator can explicitly set these non-secret `vars` in the deployment configuration:
+
+```json
+"PUBLIC_CHAT_ENABLED": "true",
+"PUBLIC_CHAT_ORIGINS": "https://westerbay.github.io"
+```
+
+Only `POST /v1/chat` and its CORS preflight become public. Health routes still require Basic Auth. The browser calls the same chat URL and JSON contract with `credentials: "omit"` and no `Authorization` header. Keep `BASIC_AUTH_PASSWORD` exclusively in Worker secrets; never embed it in frontend files. A missing private secret does not block a configured public chat.
+
+`PUBLIC_CHAT_ORIGINS` is a comma-separated list of exact HTTP(S) origins, without paths, trailing slashes or wildcards. For example, `/Home-Page/` is not part of the GitHub Pages origin. Keep localhost origins in development configuration only. Empty or invalid configuration returns a generic 503 before the RAG pipeline. An unknown supplied origin, including `null`, returns 403; a request without `Origin` remains permitted. Preflights allow POST with Content-Type only and do not call downstream services. Responses to allowed origins include CORS headers for errors and sleeping, expose `Retry-After`, and never allow browser credentials.
+
+The generated `infra/wrangler.local.json` takes precedence over the portable template. Review and update its public settings explicitly before an authorized deployment; changing only the template does not update an existing generated file, and rerunning setup regenerates it from the template. Setting the flag back to `"false"` restores private chat. A browser may then report a CORS/network error instead of exposing the 401 response; do not prompt visitors for the password.
+
+CORS does not authenticate visitors. This option adds no application rate limit, quota counter or antirobot service. Cloudflare quotas and the existing sleeping response remain unchanged. Public clients should use chat responses to observe sleep, without polling private health routes or automatically retrying failed questions.
 
 ## Free-tier boundaries
 
@@ -140,7 +157,9 @@ Set the local HTTP password in ignored `infra/.dev.vars`, using `BASIC_AUTH_PASS
 
 Keep the Markdown corpus outside Git when private and back it up separately. The D1 and Vectorize data can be rebuilt from it with the configured extractor and embedding model. Retained generations are not a substitute for a database backup. Review Cloudflare D1 backup/export procedures before production changes.
 
-Deploy prompt/code edits with `pnpm build` followed by the explicit `pnpm deploy`. Reindex only when the corpus, extractor/chunk recipe or embedding model changes. A prompt-only change does not require reindexing.
+Deploy prompt/code edits with `pnpm build` followed by the explicit `pnpm deploy`. Reindex when the corpus, extractor/chunk recipe, embedding-input recipe or embedding model changes. A prompt-only change does not require reindexing.
+
+For the contextual-retrieval update, the query-mode fix and response-style changes work with existing vectors after deployment. To associate each indexed section with its document and heading, re-export the original Markdown with the updated operator code, inspect `pnpm corpus:index --corpus YOUR_REVIEWED_CORPUS`, and explicitly publish with the same command plus `--apply`. Old exports are rejected before provider calls; do not edit their recipe fields to bypass validation. A recipe change stages a new generation even when passage text is unchanged. Do not index a parent directory containing review notes, private provenance or evaluation cases. Neither a PR nor a successful build updates the deployed Worker or active index.
 
 No live Cloudflare deployment or inference benchmark is implied by passing local tests. Verify authentication, readiness, quota behavior, citations, real-corpus answer quality, account usage and latency after configuring your own account. Performance depends on the selected models, account and corpus.
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { corpusSchema, recipeSchema } from "@small-rag/contracts/corpus";
+import { corpusSchema, recipeSchema, EMBEDDING_RECIPE, EXTRACTION_RECIPE } from "@small-rag/contracts/corpus";
 import { embeddingResponseSchema } from "@small-rag/contracts/ai";
 import type { CloudflareClient } from "./cloudflare-api.ts";
 import { cloudflareConfigSchema } from "../infra/config.ts";
@@ -21,6 +21,8 @@ export function validateCorpus(raw: unknown) {
   const corpus = corpusSchema.parse(raw);
   const recipe = recipeSchema.parse(JSON.parse(corpus.recipe));
   if (recipe.embedding_model !== EMBEDDING_MODEL) throw new Error("Export recipe has an incompatible embedding model");
+  if (recipe.embedding_recipe !== EMBEDDING_RECIPE) throw new Error("Export recipe has an incompatible embedding representation; re-export the corpus");
+  if (recipe.corpus !== EXTRACTION_RECIPE) throw new Error("Export recipe has an incompatible extraction version; re-export the corpus");
   return corpus;
 }
 
@@ -58,8 +60,11 @@ export async function publishCorpus(client: CloudflareClient, rawConfig: unknown
     const vectors = [];
     const parameters: (string | number | null)[] = [];
     for (const chunk of batch) {
+      const context = [`Document: ${chunk.document_path}`];
+      if (chunk.heading) context.push(`Heading: ${chunk.heading}`);
+      const passage = `${context.join("\n")}\n\n${chunk.text}`;
       const embedding = embeddingResponseSchema.parse(await client.call(`/ai/run/${EMBEDDING_MODEL}`, {
-        method: "POST", body: JSON.stringify({ text: [chunk.text] }),
+        method: "POST", body: JSON.stringify({ text: [passage] }),
       })).data[0];
       const vectorId = hash(`${generation}\0${chunk.chunk_id}`);
       vectors.push({ id: vectorId, namespace: generation, values: embedding });

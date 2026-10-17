@@ -17,6 +17,11 @@ test("infrastructure setup reuses existing resources and refuses incompatible ve
   };
   const config = await provision(client, template);
   assert.equal(config.d1_databases[0].database_id, "11111111-1111-4111-8111-111111111111");
+  assert.equal(config.vars.PUBLIC_CHAT_ENABLED, "false");
+  const publicTemplate = { ...template, vars: { ...template.vars,
+    PUBLIC_CHAT_ENABLED: "true", PUBLIC_CHAT_ORIGINS: "https://portfolio.example" } };
+  const publicConfig = await provision(client, publicTemplate);
+  assert.deepEqual(publicConfig.vars, publicTemplate.vars);
   assert.ok(calls.every(call => !call.method));
   client.call = async path => path.startsWith("/d1/database?")
     ? [{ name: "small-rag", uuid: "11111111-1111-4111-8111-111111111111" }]
