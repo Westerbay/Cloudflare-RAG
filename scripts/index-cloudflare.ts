@@ -69,7 +69,7 @@ export async function publishCorpus(client: CloudflareClient, rawConfig: unknown
     await query(`INSERT INTO chunks(vector_id,generation_id,chunk_id,document_path,heading,line_start,line_end,content)
       VALUES ${batch.map(() => "(?,?,?,?,?,?,?,?)").join(",")}`, parameters);
     const form = new FormData();
-    form.set("body", new Blob([vectors.map(vector => JSON.stringify(vector)).join("\n") + "\n"],
+    form.set("vectors", new Blob([vectors.map(vector => JSON.stringify(vector)).join("\n") + "\n"],
       { type: "application/x-ndjson" }), "vectors.ndjson");
     const mutation = mutationSchema.parse(await client.call(`/vectorize/v2/indexes/${vectorIndex}/upsert`, { method: "POST", body: form }));
     lastMutation = mutation.mutationId;

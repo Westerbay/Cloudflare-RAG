@@ -32,7 +32,12 @@ function fixture() {
         return { data: [[1, ...Array(1023).fill(0)]] };
       }
       if (path.endsWith("/upsert")) {
-        const body = options.body.get("body");
+        const request = new Request("https://api.cloudflare.com" + path, options);
+        assert.match(request.headers.get("Content-Type"), /^multipart\/form-data; boundary=/);
+        const form = await request.formData();
+        const body = form.get("vectors");
+        assert.ok(body instanceof File, "Vectorize expects the NDJSON file in the vectors field");
+        assert.equal(body.type, "application/x-ndjson");
         state.vectors = (await body.text()).trim().split("\n").map(line => JSON.parse(line));
         return { mutationId: "latest" };
       }

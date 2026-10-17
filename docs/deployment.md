@@ -118,7 +118,7 @@ As checked on 2026-10-16, the [Workers AI free allocation](https://developers.cl
 
 Keep the account on Workers Free and do not configure AI Gateway prepaid billing. The scripts only use free-tier-eligible products; they neither verify nor change your current subscription. **There is no application spending cap: an already paid account can bill overages instead of rejecting usage.** Check the account plan before applying. Indexing and other account applications also consume allocations. A provider hard limit stops service when its allocation is exhausted; do not upgrade automatically to recover availability.
 
-The fixed generation model is the currently listed `@cf/meta/llama-3.1-8b-instruct-fp8`. Its [model page](https://developers.cloudflare.com/workers-ai/models/llama-3.1-8b-instruct-fp8/) lists $0.152/M input tokens and $0.287/M output tokens outside included usage. The account must still have access to the model. Changing model IDs is a reviewed code change; no paid-only model or provider fallback is selected dynamically.
+The fixed generation model is the currently listed `@cf/meta/llama-3.3-70b-instruct-fp8-fast`. Its [model page](https://developers.cloudflare.com/workers-ai/models/llama-3.3-70b-instruct-fp8-fast/) lists $0.293/M input tokens and $2.253/M output tokens outside included usage. This model is listed as supporting [JSON Mode](https://developers.cloudflare.com/workers-ai/features/json-mode/), which the chatbot requires for structured answers and citations. Plain-text inference succeeding does not prove JSON Schema support. It uses the shared free daily allocation on Workers Free; it consumes more neurons per token than the previous 8B FP8 model. The account must still have access to the model. Changing model IDs is a reviewed code change; no paid-only model or provider fallback is selected dynamically.
 
 The backend has no manual daily question counter. The unused `daily_usage` table remains in the original migration for compatibility; it does not enforce a runtime quota.
 
@@ -143,3 +143,17 @@ Keep the Markdown corpus outside Git when private and back it up separately. The
 Deploy prompt/code edits with `pnpm build` followed by the explicit `pnpm deploy`. Reindex only when the corpus, extractor/chunk recipe or embedding model changes. A prompt-only change does not require reindexing.
 
 No live Cloudflare deployment or inference benchmark is implied by passing local tests. Verify authentication, readiness, quota behavior, citations, real-corpus answer quality, account usage and latency after configuring your own account. Performance depends on the selected models, account and corpus.
+
+## Troubleshoot indexing requests
+
+Operator request failures identify the operation (D1 query, Workers AI inference or Vectorize), HTTP status and numeric provider codes when available. Raw provider bodies, paths containing resource identifiers, tokens and document text are not printed. Missing known D1 index tables produce a hint to run `pnpm db:migrate:remote` against the configured database. Do not assume every HTTP 400 means migrations are missing.
+
+A transport failure identifies the operation and recognized network codes (for example, `ENOTFOUND`, `ECONNRESET` or `UND_ERR_CONNECT_TIMEOUT`) without printing raw exception messages. It can occur while connecting or reading the response. The remote write may already have been accepted; no automatic retry is made. Check connectivity and the reported service before retrying. Restarting an incomplete upload creates a new staged generation and repeats embedding calls, consuming additional AI allocation.
+
+To check the D1 schema before resuming an upload, run this read-only inspection from the repository root:
+
+```sh
+node infra/wrangler.ts d1 execute DB --remote --command "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('generations', 'chunks', 'active_generation');"
+```
+
+All three index tables should be present. If absent, apply the existing migrations to the intended database before retrying ingestion. A failed upload can leave an inactive staged generation; the script does not activate it until indexing completes. Do not delete existing generations or reset the database to investigate an error.

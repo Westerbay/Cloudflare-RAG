@@ -1,5 +1,5 @@
 // Model IDs are deliberately fixed: switching models is a reviewed code change.
-export const CHAT_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8";
+export const CHAT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 export const EMBEDDING_MODEL = "@cf/qwen/qwen3-embedding-0.6b";
 export const DIMENSIONS = 1024;
 export const MAX_OUTPUT_TOKENS = 200;
