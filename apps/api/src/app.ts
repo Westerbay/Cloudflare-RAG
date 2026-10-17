@@ -2,7 +2,7 @@ import type { ChatInput, Evidence } from "@small-rag/contracts/chat";
 import type { Database } from "@small-rag/database/bindings";
 import type { Env } from "./bindings.ts";
 import { chatInputSchema } from "@small-rag/contracts/chat";
-import { embed, generateAnswer } from "./ai.ts";
+import { embedQuery, generateAnswer } from "./ai.ts";
 import { ServiceAvailability, ServiceSleeping } from "./availability.ts";
 import {
   similarityThreshold, DIMENSIONS, EMBEDDING_MODEL, MAX_BODY_BYTES,
@@ -19,6 +19,21 @@ class RequestError extends Error {
 
 function json(value: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response {
   return Response.json(value, { status, headers: { "Cache-Control": "no-store", ...extraHeaders } });
+}
+
+function publicChatHeaders(request: Request, configuredOrigins = ""): Record<string, string> {
+  const origins = configuredOrigins.split(",").map(origin => origin.trim()).filter(Boolean);
+  if (origins.length === 0) throw new Error("Public chat origins are not configured");
+  for (const origin of origins) {
+    const url = new URL(origin);
+    if ((url.protocol !== "https:" && url.protocol !== "http:") || url.origin !== origin) {
+      throw new Error("Invalid public chat origin");
+    }
+  }
+  const origin = request.headers.get("Origin");
+  if (origin === null) return {};
+  if (!origins.includes(origin)) throw new RequestError(403, "Origin is not allowed");
+  return { "Access-Control-Allow-Origin": origin, "Access-Control-Expose-Headers": "Retry-After" };
 }
 
 async function authenticated(request: Request, password: string): Promise<boolean> {
@@ -79,7 +94,7 @@ async function activeGeneration(db: Database, availability: ServiceAvailability,
 }
 
 async function retrieve(env: Env, input: ChatInput, generation: string, threshold: number, availability: ServiceAvailability, clock: () => number): Promise<Evidence[]> {
-  const vector = await embed(env.AI, input.message);
+  const vector = await embedQuery(env.AI, input);
   const matches = await availability.run("vectorize", () =>
     env.VECTORS.query(vector, { topK: TOP_K, namespace: generation, returnMetadata: "none" }), clock);
   const evidence: Evidence[] = [];
@@ -108,6 +123,7 @@ async function retrieve(env: Env, input: ChatInput, generation: string, threshol
 
 export async function handleRequest(request: Request, env: Env, prompt: string, now?: Date): Promise<Response> {
   const clock = () => now?.getTime() ?? Date.now();
+  const corsHeaders: Record<string, string> = {};
   let availability = availabilityByDatabase.get(env.DB);
   if (!availability) {
     availability = new ServiceAvailability();
@@ -118,13 +134,31 @@ export async function handleRequest(request: Request, env: Env, prompt: string, 
     run: (model, input) => services.run("workers_ai", () => env.AI.run(model, input), clock),
   } };
   try {
-    if (!env.BASIC_AUTH_PASSWORD || env.BASIC_AUTH_PASSWORD.length < 16) {
-      return json({ detail: "Service authentication is not configured" }, 503);
-    }
-    if (!await authenticated(request, env.BASIC_AUTH_PASSWORD)) {
-      return json({ detail: "Authentication required" }, 401, { "WWW-Authenticate": 'Basic realm="Small RAG", charset="UTF-8"' });
-    }
     const path = new URL(request.url).pathname;
+    const publicChat = env.PUBLIC_CHAT_ENABLED === "true" && path === "/v1/chat"
+      && (request.method === "POST" || request.method === "OPTIONS");
+    if (publicChat) {
+      corsHeaders.Vary = "Origin";
+      Object.assign(corsHeaders, publicChatHeaders(request, env.PUBLIC_CHAT_ORIGINS));
+      if (request.method === "OPTIONS") {
+        const requestedHeaders = (request.headers.get("Access-Control-Request-Headers") ?? "")
+          .split(",").map(header => header.trim().toLowerCase()).filter(Boolean);
+        if (request.headers.get("Access-Control-Request-Method") !== "POST"
+            || requestedHeaders.some(header => header !== "content-type")) {
+          throw new RequestError(403, "Preflight is not allowed");
+        }
+        return new Response(null, { status: 204, headers: { ...corsHeaders,
+          "Cache-Control": "no-store", "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type" } });
+      }
+    } else {
+      if (!env.BASIC_AUTH_PASSWORD || env.BASIC_AUTH_PASSWORD.length < 16) {
+        return json({ detail: "Service authentication is not configured" }, 503);
+      }
+      if (!await authenticated(request, env.BASIC_AUTH_PASSWORD)) {
+        return json({ detail: "Authentication required" }, 401, { "WWW-Authenticate": 'Basic realm="Small RAG", charset="UTF-8"' });
+      }
+    }
     if (request.method === "GET" && path === "/health/live") return json({ status: "ok" });
     if (request.method === "GET" && path === "/health/ready") {
       similarityThreshold(env.MIN_SIMILARITY);
@@ -140,9 +174,9 @@ export async function handleRequest(request: Request, env: Env, prompt: string, 
     const generation = await activeGeneration(env.DB, services, clock);
     const threshold = similarityThreshold(env.MIN_SIMILARITY);
     const evidence = await retrieve(bindings, input, generation, threshold, services, clock);
-    return json(await generateAnswer(bindings.AI, prompt, input, evidence));
+    return json(await generateAnswer(bindings.AI, prompt, input, evidence), 200, corsHeaders);
   } catch (error) {
-    if (error instanceof RequestError) return json({ detail: error.message }, error.status);
+    if (error instanceof RequestError) return json({ detail: error.message }, error.status, corsHeaders);
     if (error instanceof ServiceSleeping) {
       const pause = error.pause;
       return json({
@@ -150,9 +184,9 @@ export async function handleRequest(request: Request, env: Env, prompt: string, 
         service: pause.service, reason: pause.reason,
         retry_at: new Date(pause.retryAt).toISOString(),
         ...(pause.resetAt ? { reset_at: new Date(pause.resetAt).toISOString() } : {}),
-      }, 503, { "Retry-After": String(Math.max(1, Math.ceil((pause.retryAt - clock()) / 1000))) });
+      }, 503, { ...corsHeaders, "Retry-After": String(Math.max(1, Math.ceil((pause.retryAt - clock()) / 1000))) });
     }
     // Do not expose provider payloads, credentials, questions or passages in errors/logs.
-    return json({ detail: "RAG service is unavailable" }, 503);
+    return json({ detail: "RAG service is unavailable" }, 503, corsHeaders);
   }
 }

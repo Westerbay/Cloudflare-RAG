@@ -36,6 +36,8 @@
     }
   ],
   "vars": {
-    "MIN_SIMILARITY": "0.4"
+    "MIN_SIMILARITY": "0.4",
+    "PUBLIC_CHAT_ENABLED": "false",
+    "PUBLIC_CHAT_ORIGINS": ""
   }
 }

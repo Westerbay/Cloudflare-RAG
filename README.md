@@ -12,7 +12,7 @@ Cloudflare RAG is evolving toward better document retrieval and more accurate, s
 
 ## Architecture
 
-- **Workers:** authenticated `POST /v1/chat` and health endpoints.
+- **Workers:** private-by-default `POST /v1/chat`, optional public browser access, and authenticated health endpoints.
 - **Workers AI:** `@cf/meta/llama-3.3-70b-instruct-fp8-fast` for generation and `@cf/qwen/qwen3-embedding-0.6b` for 1024-dimensional embeddings.
 - **D1:** source passages, original chunk hashes, line ranges and the active index generation.
 - **Vectorize:** cosine search, isolated by index-generation namespace.
@@ -48,7 +48,7 @@ pnpm deploy
 node infra/wrangler.ts secret put BASIC_AUTH_PASSWORD
 ```
 
-`infra:setup --apply` reuses or creates the named D1 database and Vectorize index, checks dimensions/metric and saves non-secret IDs in ignored `infra/wrangler.local.json`. It does not change billing, deploy code, write secrets or apply migrations. Each later remote command is explicit. Choose an authentication password of at least 16 characters; Wrangler prompts for it. Until configured, the service returns 503. The HTTP Basic username is `rag` for every route, including health checks.
+`infra:setup --apply` reuses or creates the named D1 database and Vectorize index, checks dimensions/metric and saves non-secret IDs in ignored `infra/wrangler.local.json`. It does not change billing, deploy code, write secrets or apply migrations. Each later remote command is explicit. Choose an authentication password of at least 16 characters; Wrangler prompts for it. The default private mode requires HTTP Basic username `rag` on every route and returns 503 until its secret is configured. Health checks always remain private.
 
 Wrangler prints your `https://small-rag.<subdomain>.workers.dev` URL. A purchased domain is optional. Test with your actual URL:
 
@@ -59,6 +59,8 @@ curl -u rag https://small-rag.YOUR-SUBDOMAIN.workers.dev/v1/chat \
 ```
 
 `curl` prompts for the password. The response includes `status` (`answered`, `insufficient_context` or `out_of_scope`), `answer`, and `citations` with original chunk IDs, relative source paths and line ranges. This is an API; it does not include a chat web interface.
+
+For a public portfolio, explicitly enable `PUBLIC_CHAT_ENABLED="true"` and configure `PUBLIC_CHAT_ORIGINS` as described in [public browser access](docs/deployment.md#public-browser-access). Only chat and its CORS preflight become public; the browser sends no password or cookie. Review the entire corpus before activation. Public access adds no application quota or anti-abuse mechanism, and uses the existing service sleep behavior.
 
 ## Cloudflare quotas and service sleep
 
@@ -81,7 +83,9 @@ pnpm corpus:index --corpus data/corpus --apply
 
 Only `.md` and `.markdown` files are read. The operator profile allows up to 100 files and 1000 chunks. It sends passages to Workers AI for embedding and stores them in D1; queries and selected passages are also processed by Cloudflare. There is no public ingestion endpoint. Unchanged corpora are detected before new embeddings are requested. Indexing stages a new generation and waits for the Vectorize mutation before activating it in D1. Run only one indexing job per index at a time.
 
-Edit `prompts/system.md` for the mission and JSON contract and `prompts/SOUL.md` for style, then rebuild/deploy. Prompt edits do not require reindexing. Switching the embedding model or extraction/chunking recipe requires reindexing; existing vectors are not mixed with a different embedding model.
+Document embeddings include the source path and heading ancestry so sections retain their subject. Chat uses Qwen's query mode and the latest two history messages for follow-up context, with no extra rewriting call. Only indexed passages can support factual answers.
+
+Edit `prompts/system.md` for the mission and JSON contract and `prompts/SOUL.md` for style, then rebuild/deploy. Prompt edits do not require reindexing. Switching the embedding model, embedding-input representation or extraction/chunking recipe requires re-exporting and reindexing; existing vectors are not mixed with a different embedding model. See [updates and recovery](docs/deployment.md#updates-and-recovery) for the contextual-retrieval rollout.
 
 ## Development
 

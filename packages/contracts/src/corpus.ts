@@ -4,6 +4,8 @@ export const MAX_DOCUMENTS = 100;
 export const MAX_CHUNKS = 1000;
 export const CHUNK_SIZE = 1200;
 export const CHUNK_OVERLAP = 120;
+export const EXTRACTION_RECIPE = "markdown-it-15.0.2-commonmark/utf16-v3";
+export const EMBEDDING_RECIPE = "document-path-heading-text-v1";
 export const chunkSchema = z.strictObject({
   chunk_id: z.string().regex(/^[a-f0-9]{64}$/),
   document_path: z.string().min(1).refine(path => !path.startsWith("/") && !path.includes("\\")
@@ -18,4 +20,6 @@ export const corpusSchema = z.strictObject({
 }).refine(corpus => new Set(corpus.chunks.map(chunk => chunk.chunk_id)).size === corpus.chunks.length,
   "Duplicate chunk IDs");
 export type Corpus = z.infer<typeof corpusSchema>;
-export const recipeSchema = z.object({ embedding_model: z.string() });
+export const recipeSchema = z.object({
+  corpus: z.string(), embedding_model: z.string(), embedding_recipe: z.string(),
+});

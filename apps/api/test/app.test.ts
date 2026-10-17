@@ -75,6 +75,260 @@ test("chat crosses retrieval and generation and restores original citations in m
   } finally { db.sqlite.close(); }
 });
 
+test("French questions use Qwen query mode rather than its document alias", async () => {
+  const { db, env, calls } = fixture();
+  try {
+    const response = await handleRequest(request({ message: "Quel est le but du jeu Eyefox Puzzle ?", history: [] }), env, PROMPT, NOW);
+    assert.equal(response.status, 200);
+    assert.deepEqual(calls[0].input.queries, ["Quel est le but du jeu Eyefox Puzzle ?"]);
+    assert.equal("text" in calls[0].input, false);
+    assert.equal("documents" in calls[0].input, false);
+    assert.equal(typeof calls[0].input.instruction, "string");
+    assert.equal(calls.length, 2, "retrieval must not add a rewriting or translation model call");
+  } finally { db.sqlite.close(); }
+});
+
+test("follow-up retrieval carries only recent conversation context and never promotes it to evidence", async () => {
+  const { db, env, state, calls } = fixture();
+  const history = [
+    { role: "user", content: "Describe an unrelated old project." },
+    { role: "assistant", content: "An unrelated old answer." },
+    { role: "user", content: "Qui est Mathis Dubuisson ?" },
+    { role: "assistant", content: "Mathis is an engineer. His salary is 999999 euros." },
+  ];
+  state.matches = [];
+  state.reply = { status: "insufficient_context", answer: "Information absente des documents.", citations: [] };
+  try {
+    const response = await handleRequest(request({ message: "Quel est son parcours ?", history }), env, PROMPT, NOW);
+    assert.equal(response.status, 200);
+    const queries = calls[0].input.queries;
+    assert.ok(Array.isArray(queries) && typeof queries[0] === "string");
+    assert.match(queries[0], /Quel est son parcours/);
+    assert.match(queries[0], /Mathis Dubuisson/);
+    assert.equal(queries[0].includes("unrelated old"), false);
+    const messages = calls[1].input.messages;
+    assert.ok(Array.isArray(messages) && isObject(messages[1]));
+    const payload = JSON.parse(String(messages[1].content));
+    assert.deepEqual(payload.evidence, []);
+    assert.deepEqual(payload.history, history);
+    assert.equal(payload.required_status, "insufficient_context");
+    assert.equal(calls.length, 2);
+  } finally { db.sqlite.close(); }
+});
+
+test("long prior answers are bounded in search while the current question and generation history stay intact", async () => {
+  const { db, env, calls } = fixture();
+  const message = "Comment se joue Eyefox Puzzle ? " + "?".repeat(1400);
+  const history = [
+    { role: "user", content: "Quel est son parcours ? " + "u".repeat(400) },
+    { role: "assistant", content: "His previous experience: " + "a".repeat(1400) },
+  ];
+  try {
+    const response = await handleRequest(request({ message, history }), env, PROMPT, NOW);
+    assert.equal(response.status, 200);
+    const queries = calls[0].input.queries;
+    assert.ok(Array.isArray(queries) && typeof queries[0] === "string");
+    const retrieval = JSON.parse(queries[0]);
+    assert.equal(retrieval.question, message);
+    assert.deepEqual(retrieval.recent_context.map((turn: { content: string }) => turn.content.length), [200, 200]);
+    const messages = calls[1].input.messages;
+    assert.ok(Array.isArray(messages) && isObject(messages[1]));
+    assert.deepEqual(JSON.parse(String(messages[1].content)).history, history);
+  } finally { db.sqlite.close(); }
+});
+
+test("public chat answers without a password and exposes its response to an allowed origin", async () => {
+  const { db, env, calls } = fixture();
+  const origin = "https://portfolio.example";
+  const publicEnv = { ...env, BASIC_AUTH_PASSWORD: undefined,
+    PUBLIC_CHAT_ENABLED: "true", PUBLIC_CHAT_ORIGINS: origin };
+  const chat = request();
+  chat.headers.delete("Authorization");
+  chat.headers.set("Origin", origin);
+  try {
+    const response = await handleRequest(chat, publicEnv, PROMPT, NOW);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+    assert.equal(response.headers.get("Vary"), "Origin");
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("Access-Control-Expose-Headers"), "Retry-After");
+    assert.equal(response.headers.get("Access-Control-Allow-Credentials"), null);
+    assert.equal(response.headers.get("WWW-Authenticate"), null);
+    assert.equal((await response.json()).status, "answered");
+    assert.equal(calls.length, 2);
+  } finally { db.sqlite.close(); }
+});
+
+test("public chat preflight permits only POST and Content-Type without touching downstream services", async context => {
+  const { db, env, calls } = fixture();
+  env.PUBLIC_CHAT_ENABLED = "true";
+  env.PUBLIC_CHAT_ORIGINS = "https://portfolio.example";
+  env.BASIC_AUTH_PASSWORD = undefined;
+  const prepare = context.mock.method(db, "prepare", () => { throw new Error("Preflight must not touch D1"); });
+  const preflight = (method = "POST", headers = "content-type") => new Request("https://example.test/v1/chat", {
+    method: "OPTIONS", headers: { Origin: "https://portfolio.example",
+      "Access-Control-Request-Method": method, "Access-Control-Request-Headers": headers },
+  });
+  try {
+    const response = await handleRequest(preflight(), env, PROMPT, NOW);
+    assert.equal(response.status, 204);
+    assert.equal(await response.text(), "");
+    assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://portfolio.example");
+    assert.equal(response.headers.get("Access-Control-Allow-Methods"), "POST, OPTIONS");
+    assert.equal(response.headers.get("Access-Control-Allow-Headers"), "Content-Type");
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(response.headers.get("WWW-Authenticate"), null);
+    for (const invalid of [preflight("DELETE"), preflight("POST", "content-type, authorization")]) {
+      const denied = await handleRequest(invalid, env, PROMPT, NOW);
+      assert.equal(denied.status, 403);
+      assert.equal(denied.headers.get("Access-Control-Allow-Origin"), "https://portfolio.example");
+    }
+    assert.equal(prepare.mock.callCount(), 0);
+    assert.equal(calls.length, 0);
+  } finally { db.sqlite.close(); }
+});
+
+test("public access is opt-in and never opens health checks or other routes", async () => {
+  const { db, env, calls } = fixture();
+  env.PUBLIC_CHAT_ORIGINS = "https://portfolio.example";
+  try {
+    for (const enabled of [undefined, "false", "TRUE"]) {
+      env.PUBLIC_CHAT_ENABLED = enabled;
+      for (const method of ["POST", "OPTIONS"]) {
+        const response = await handleRequest(new Request("https://example.test/v1/chat", {
+          method, headers: { Origin: "https://portfolio.example" },
+        }), env, PROMPT, NOW);
+        assert.equal(response.status, 401);
+        assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
+      }
+    }
+    env.PUBLIC_CHAT_ENABLED = "true";
+    for (const [method, path] of [["GET", "/health/live"], ["GET", "/health/ready"],
+      ["OPTIONS", "/health/live"], ["GET", "/v1/chat"], ["POST", "/v1/chat/"]]) {
+      const response = await handleRequest(new Request(`https://example.test${path}`, {
+        method, headers: { Origin: "https://portfolio.example" },
+      }), env, PROMPT, NOW);
+      assert.equal(response.status, 401);
+      assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
+    }
+    for (const path of ["/health/live", "/health/ready"]) {
+      const health = new Request(`https://example.test${path}`, { headers: request().headers });
+      assert.equal((await handleRequest(health, env, PROMPT, NOW)).status, 200);
+      assert.equal((await handleRequest(health, { ...env, BASIC_AUTH_PASSWORD: undefined }, PROMPT, NOW)).status, 503);
+    }
+    assert.equal(calls.length, 0);
+  } finally { db.sqlite.close(); }
+});
+
+test("public chat rejects unknown origins even with credentials and accepts callers without Origin", async context => {
+  const { db, env, calls } = fixture();
+  env.PUBLIC_CHAT_ENABLED = "true";
+  env.PUBLIC_CHAT_ORIGINS = "https://portfolio.example, https://second.example";
+  const prepare = context.mock.method(db, "prepare", () => { throw new Error("Rejected origins must not touch D1"); });
+  try {
+    for (const origin of ["https://unknown.example", "null", "https://portfolio.example.attacker.test"]) {
+      const chat = request();
+      chat.headers.set("Origin", origin);
+      const response = await handleRequest(chat, env, PROMPT, NOW);
+      assert.equal(response.status, 403);
+      assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
+      assert.equal(response.headers.get("Vary"), "Origin");
+    }
+    assert.equal(prepare.mock.callCount(), 0);
+    assert.equal(calls.length, 0);
+    prepare.mock.restore();
+    for (const origin of [null, "https://second.example"]) {
+      const chat = request();
+      chat.headers.set("Authorization", "invalid credentials are ignored on the public route");
+      if (origin) chat.headers.set("Origin", origin);
+      const response = await handleRequest(chat, env, PROMPT, NOW);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+      assert.equal(response.headers.get("WWW-Authenticate"), null);
+      assert.equal((await response.text()).includes(PASSWORD), false);
+    }
+  } finally { db.sqlite.close(); }
+});
+
+test("missing or invalid public origins fail closed without affecting private health", async context => {
+  const { db, env, calls } = fixture();
+  env.PUBLIC_CHAT_ENABLED = "true";
+  const prepare = context.mock.method(db, "prepare", () => { throw new Error("Invalid configuration must not touch D1"); });
+  try {
+    for (const origins of [undefined, "", "*", "null", "https://portfolio.example/path"]) {
+      env.PUBLIC_CHAT_ORIGINS = origins;
+      const response = await handleRequest(request(), env, PROMPT, NOW);
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), { detail: "RAG service is unavailable" });
+    }
+    const health = new Request("https://example.test/health/live", { headers: request().headers });
+    assert.equal((await handleRequest(health, env, PROMPT, NOW)).status, 200);
+    assert.equal(prepare.mock.callCount(), 0);
+    assert.equal(calls.length, 0);
+  } finally { db.sqlite.close(); }
+});
+
+test("public chat keeps input and generation errors readable through CORS", async () => {
+  const { db, env, state, calls } = fixture();
+  env.PUBLIC_CHAT_ENABLED = "true";
+  env.PUBLIC_CHAT_ORIGINS = "https://portfolio.example";
+  const unsupported = request();
+  unsupported.headers.set("Content-Type", "text/plain");
+  try {
+    for (const [chat, status] of [[unsupported, 415], [request({ message: "" }), 422],
+      [request({ message: "x".repeat(20_000) }), 413]] satisfies [Request, number][]) {
+      chat.headers.delete("Authorization");
+      chat.headers.set("Origin", "https://portfolio.example");
+      const response = await handleRequest(chat, env, PROMPT, NOW);
+      assert.equal(response.status, status);
+      assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://portfolio.example");
+    }
+    assert.equal(calls.length, 0);
+    state.reply = { status: "answered", answer: "Invalid answer", citations: [] };
+    const chat = request();
+    chat.headers.delete("Authorization");
+    chat.headers.set("Origin", "https://portfolio.example");
+    const response = await handleRequest(chat, env, PROMPT, NOW);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://portfolio.example");
+    assert.deepEqual(await response.json(), { detail: "RAG service is unavailable" });
+  } finally { db.sqlite.close(); }
+});
+
+test("public quota sleep preserves retry metadata and skips downstream calls while cached", async context => {
+  const { db, env } = fixture();
+  env.PUBLIC_CHAT_ENABLED = "true";
+  env.PUBLIC_CHAT_ORIGINS = "https://portfolio.example";
+  env.BASIC_AUTH_PASSWORD = undefined;
+  const run = context.mock.method(env.AI, "run", async () => { throw new Error("AI_ERROR: 3036: daily free allocation exhausted"); });
+  const chat = () => {
+    const value = request();
+    value.headers.delete("Authorization");
+    value.headers.set("Origin", "https://portfolio.example");
+    return value;
+  };
+  try {
+    const response = await handleRequest(chat(), env, PROMPT, NOW);
+    const expected = { status: "sleeping", detail: "Waiting for Cloudflare service availability",
+      service: "workers_ai", reason: "quota_exhausted",
+      retry_at: "2026-10-16T00:00:00.000Z", reset_at: "2026-10-16T00:00:00.000Z" };
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), expected);
+    assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://portfolio.example");
+    assert.equal(response.headers.get("Access-Control-Expose-Headers"), "Retry-After");
+    assert.equal(response.headers.get("Retry-After"), "43200");
+    const prepare = context.mock.method(db, "prepare", () => { throw new Error("Cached sleep must not touch D1"); });
+    const cached = await handleRequest(chat(), env, PROMPT, NOW);
+    assert.deepEqual(await cached.json(), expected);
+    assert.equal(cached.headers.get("Access-Control-Allow-Origin"), "https://portfolio.example");
+    const preflight = new Request("https://example.test/v1/chat", { method: "OPTIONS",
+      headers: { Origin: "https://portfolio.example", "Access-Control-Request-Method": "POST" } });
+    assert.equal((await handleRequest(preflight, env, PROMPT, NOW)).status, 204);
+    assert.equal(prepare.mock.callCount(), 0);
+    assert.equal(run.mock.callCount(), 1);
+  } finally { db.sqlite.close(); }
+});
+
 test("Cloudflare availability permits more than 500 questions without a local counter", async () => {
   const { db, env, calls } = fixture();
   try {

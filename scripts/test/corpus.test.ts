@@ -35,7 +35,8 @@ test("export is stable, source-linked, ordered and changes identity after a sour
     assert.equal(first.chunks[0].text, "Guide\n\nA fact.");
     assert.deepEqual([first.chunks[0].line_start, first.chunks[0].line_end], [1, 3]);
     assert.match(first.chunks[0].chunk_id, /^[a-f0-9]{64}$/);
-    assert.match(first.recipe, /markdown-it-15.0.2-commonmark\/utf16-v2/);
+    assert.match(first.recipe, /markdown-it-15.0.2-commonmark\/utf16-v3/);
+    assert.equal(JSON.parse(first.recipe).embedding_recipe, "document-path-heading-text-v1");
     await writeFile(join(root, "nested", "guide.MD"), "# Guide\n\nA changed fact.\n");
     assert.notEqual((await exportCorpus(root)).chunks[0].chunk_id, first.chunks[0].chunk_id);
   } finally { await cleanup(); }
@@ -105,9 +106,24 @@ test("native export crosses staging and repeated ingestion without live services
 test("skipped Markdown heading levels keep siblings out of each other's ancestry", () => {
   const blocks = extractBlocks("# Guide\n\n### First\n\nOne.\n\n### Second\n\nTwo.\n\n## Parent\n\n#### Child\n\nThree.\n\n## Replacement\n\nFour.\n");
   assert.deepEqual(blocks.map(block => [block.text, block.heading]), [
-    ["Guide", "Guide"], ["First", "Guide > First"], ["One.", "Guide > First"],
+    ["First", "Guide > First"], ["One.", "Guide > First"],
     ["Second", "Guide > Second"], ["Two.", "Guide > Second"],
-    ["Parent", "Guide > Parent"], ["Child", "Guide > Parent > Child"], ["Three.", "Guide > Parent > Child"],
+    ["Child", "Guide > Parent > Child"], ["Three.", "Guide > Parent > Child"],
     ["Replacement", "Guide > Replacement"], ["Four.", "Guide > Replacement"],
   ]);
+});
+
+test("empty parent headings stay in ancestry without separate vectors, preserving leaf headings and short body text", async () => {
+  const { root, cleanup } = await fixture();
+  try {
+    await writeFile(join(root, "eyefox.md"), "# Eyefox Puzzle\n\n## Gameplay\n\n### Rule\n\nMatch both grids.\n\n## Android only\n");
+    const corpus = await exportCorpus(root);
+    assert.equal(corpus.chunks.length, 2);
+    assert.equal(corpus.chunks[0].text, "Rule\n\nMatch both grids.");
+    assert.equal(corpus.chunks[0].heading, "Eyefox Puzzle > Gameplay > Rule");
+    assert.deepEqual([corpus.chunks[0].line_start, corpus.chunks[0].line_end], [5, 7]);
+    assert.equal(corpus.chunks[1].text, "Android only");
+    await writeFile(join(root, "eyefox.md"), "# Eyefox Puzzle\n\n## Gameplay\n");
+    assert.deepEqual((await exportCorpus(root)).chunks.map(chunk => chunk.text), ["Eyefox Puzzle", "Gameplay"]);
+  } finally { await cleanup(); }
 });

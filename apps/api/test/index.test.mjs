@@ -5,7 +5,8 @@ import { EMBEDDING_MODEL } from "@small-rag/contracts/config";
 import { SQLiteDatabase } from "./sqlite.ts";
 
 const corpus = {
-  recipe: JSON.stringify({ embedding_model: EMBEDDING_MODEL, corpus: "test", size_chars: 1200, overlap_chars: 120 }),
+  recipe: JSON.stringify({ embedding_model: EMBEDDING_MODEL, corpus: "markdown-it-15.0.2-commonmark/utf16-v3",
+    embedding_recipe: "document-path-heading-text-v1", size_chars: 1200, overlap_chars: 120 }),
   chunks: [{ chunk_id: "a".repeat(64), document_path: "guide.md", heading: null,
     line_start: 1, line_end: 3, text: "Cloudflare runs the model." }],
 };
@@ -17,7 +18,7 @@ function fixture() {
   db.sqlite.prepare("INSERT INTO generations(id,embedding_model,recipe,chunk_count) VALUES(?,?,?,?)")
     .run("previous", EMBEDDING_MODEL, "old", 1);
   db.sqlite.exec("INSERT INTO active_generation VALUES(1,'previous')");
-  const state = { processed: true, embeddings: 0, fail: false, vectorCount: 1, vectors: [] };
+  const state = { processed: true, embeddings: 0, embeddingTexts: [], fail: false, vectorCount: 1, vectors: [] };
   const client = {
     account: config.account_id,
     async call(path, options = {}) {
@@ -28,6 +29,7 @@ function fixture() {
       }
       if (path.includes("/ai/run/")) {
         state.embeddings++;
+        state.embeddingTexts.push(JSON.parse(options.body).text);
         if (state.fail) throw new Error("Simulated provider failure");
         return { data: [[1, ...Array(1023).fill(0)]] };
       }
@@ -91,4 +93,56 @@ test("staging cannot exceed the free vector storage allowance", async () => {
 test("unsafe source paths and duplicate chunks fail validation before any external calls", () => {
   assert.throws(() => validateCorpus({ ...corpus, chunks: [{ ...corpus.chunks[0], document_path: "../private.md" }] }));
   assert.throws(() => validateCorpus({ ...corpus, chunks: [corpus.chunks[0], corpus.chunks[0]] }));
+});
+
+test("passage embeddings include document and heading context without changing stored evidence", async () => {
+  const { db, state, client } = fixture();
+  const contextual = { ...corpus, chunks: [
+    { ...corpus.chunks[0], document_path: "projects/eyefox.md", heading: "Eyefox Puzzle > Gameplay",
+      text: "Match both grids.", line_start: 7, line_end: 7 },
+    { ...corpus.chunks[0], chunk_id: "b".repeat(64) },
+  ] };
+  try {
+    await publishCorpus(client, config, contextual);
+    assert.deepEqual(state.embeddingTexts, [
+      ["Document: projects/eyefox.md\nHeading: Eyefox Puzzle > Gameplay\n\nMatch both grids."],
+      ["Document: guide.md\n\nCloudflare runs the model."],
+    ]);
+    const rows = db.sqlite.prepare("SELECT chunk_id,document_path,heading,line_start,line_end,content FROM chunks ORDER BY document_path").all();
+    assert.deepEqual(rows.map(row => ({ ...row })), contextual.chunks.toReversed().map(chunk => ({
+      chunk_id: chunk.chunk_id, document_path: chunk.document_path, heading: chunk.heading,
+      line_start: chunk.line_start, line_end: chunk.line_end, content: chunk.text,
+    })));
+  } finally { db.sqlite.close(); }
+});
+
+test("legacy or incompatible export recipes are rejected before any Cloudflare call", async () => {
+  let calls = 0;
+  const client = { account: config.account_id, async call() { calls++; throw new Error("Unexpected provider call"); } };
+  const recipe = JSON.parse(corpus.recipe);
+  for (const incompatible of [
+    { ...recipe, embedding_recipe: undefined },
+    { ...recipe, embedding_recipe: "text-only-v0" },
+    { ...recipe, embedding_model: "different-model" },
+    { ...recipe, corpus: "markdown-it-15.0.2-commonmark/utf16-v2" },
+  ]) {
+    await assert.rejects(publishCorpus(client, config, { ...corpus, recipe: JSON.stringify(incompatible) }),
+      /embedding_recipe|incompatible/);
+  }
+  assert.equal(calls, 0);
+});
+
+test("an embedding recipe change reindexes identical chunks instead of returning unchanged", async () => {
+  const { db, state, client } = fixture();
+  try {
+    const first = await publishCorpus(client, config, corpus);
+    const legacy = JSON.stringify({ ...JSON.parse(corpus.recipe), embedding_recipe: "text-only-v0" });
+    db.sqlite.prepare("UPDATE generations SET recipe=? WHERE id=?").run(legacy, first.generation);
+    const next = await publishCorpus(client, config, corpus);
+    assert.equal(next.unchanged, false);
+    assert.notEqual(next.generation, first.generation);
+    assert.equal(state.embeddings, 2);
+    assert.equal((await publishCorpus(client, config, corpus)).unchanged, true);
+    assert.equal(state.embeddings, 2);
+  } finally { db.sqlite.close(); }
 });

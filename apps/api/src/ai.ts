@@ -4,6 +4,8 @@ import type { Evidence, ChatInput } from "@small-rag/contracts/chat";
 import type { AIBinding } from "./bindings.ts";
 import { CHAT_MODEL, EMBEDDING_MODEL, MAX_OUTPUT_TOKENS } from "@small-rag/contracts/config";
 
+const RETRIEVAL_HISTORY_CHARS_PER_TURN = 200;
+
 export function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -12,8 +14,20 @@ export function embeddingFromResponse(value: unknown): number[] {
   return embeddingResponseSchema.parse(value).data[0];
 }
 
-export async function embed(ai: AIBinding, text: string): Promise<number[]> {
-  return embeddingFromResponse(await ai.run(EMBEDDING_MODEL, { text: [text] }));
+export async function embedQuery(ai: AIBinding, input: ChatInput): Promise<number[]> {
+  // History resolves references for retrieval only; generation still requires indexed evidence.
+  const recentContext = input.history.slice(-2).map(turn => ({
+    role: turn.role, content: turn.content.slice(0, RETRIEVAL_HISTORY_CHARS_PER_TURN),
+  }));
+  let query = input.message;
+  if (recentContext.length > 0) {
+    query = JSON.stringify({ question: input.message, recent_context: recentContext });
+  }
+  // Qwen's `text` input aliases documents, which omits query-task conditioning.
+  return embeddingFromResponse(await ai.run(EMBEDDING_MODEL, {
+    queries: [query],
+    instruction: "Retrieve passages that answer the current question, even if written in another language. Use recent conversation only to resolve references; prioritize the current question.",
+  }));
 }
 
 function modelAnswer(value: unknown): unknown {

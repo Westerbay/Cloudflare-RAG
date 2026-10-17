@@ -20,3 +20,5 @@ pnpm db:migrate:remote
 Ingestion, deployment and secret entry are explicit separate operations. See the [deployment guide](../docs/deployment.md). Setup never upgrades billing, deletes an index, resets a database or writes a secret. Inspect existing `small-rag` resource names before applying to an account; incompatible vector settings fail instead of replacing resources.
 
 The API is a native Cloudflare Worker with AI, D1 and Vectorize bindings. Corpus preparation and infrastructure commands run from the local Node.js workspace.
+
+The template defaults to private chat with `PUBLIC_CHAT_ENABLED="false"`. Public browser access uses only that flag and `PUBLIC_CHAT_ORIGINS`, with no new binding or resource. `wrangler.ts` prefers an existing `wrangler.local.json`; setup preserves the template's variables when generating it, but later template edits are not merged automatically. Review the effective configuration before any authorized activation. See [public browser access](../docs/deployment.md#public-browser-access); Basic Auth remains required for health routes.
