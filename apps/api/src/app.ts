@@ -93,8 +93,13 @@ async function activeGeneration(db: Database, availability: ServiceAvailability,
   return row.id;
 }
 
-async function retrieve(env: Env, input: ChatInput, generation: string, threshold: number, availability: ServiceAvailability, clock: () => number): Promise<Evidence[]> {
-  const vector = await embedQuery(env.AI, input);
+interface RetrievedContext {
+  evidence: Evidence[];
+  searchQuestion: string;
+}
+
+async function retrieve(env: Env, input: ChatInput, generation: string, threshold: number, availability: ServiceAvailability, clock: () => number): Promise<RetrievedContext> {
+  const { question, vector } = await embedQuery(env.AI, input);
   const matches = await availability.run("vectorize", () =>
     env.VECTORS.query(vector, { topK: TOP_K, namespace: generation, returnMetadata: "none" }), clock);
   const evidence: Evidence[] = [];
@@ -118,7 +123,7 @@ async function retrieve(env: Env, input: ChatInput, generation: string, threshol
       lines: [row.line_start, row.line_end], heading: row.heading, text });
     remaining -= text.length;
   }
-  return evidence;
+  return { evidence, searchQuestion: question };
 }
 
 export async function handleRequest(request: Request, env: Env, prompt: string, now?: Date): Promise<Response> {
@@ -173,8 +178,8 @@ export async function handleRequest(request: Request, env: Env, prompt: string, 
     services.check(clock());
     const generation = await activeGeneration(env.DB, services, clock);
     const threshold = similarityThreshold(env.MIN_SIMILARITY);
-    const evidence = await retrieve(bindings, input, generation, threshold, services, clock);
-    return json(await generateAnswer(bindings.AI, prompt, input, evidence), 200, corsHeaders);
+    const { evidence, searchQuestion } = await retrieve(bindings, input, generation, threshold, services, clock);
+    return json(await generateAnswer(bindings.AI, prompt, input, evidence, searchQuestion), 200, corsHeaders);
   } catch (error) {
     if (error instanceof RequestError) return json({ detail: error.message }, error.status, corsHeaders);
     if (error instanceof ServiceSleeping) {
