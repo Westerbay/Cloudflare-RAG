@@ -9,7 +9,7 @@ The intended use is a portfolio guide: answer visitors’ questions about the ow
 ## Architecture
 
 - **Workers:** authenticated `POST /v1/chat` and health endpoints.
-- **Workers AI:** `@cf/meta/llama-3.1-8b-instruct-fp8` for generation and `@cf/qwen/qwen3-embedding-0.6b` for 1024-dimensional embeddings.
+- **Workers AI:** `@cf/meta/llama-3.3-70b-instruct-fp8-fast` for generation and `@cf/qwen/qwen3-embedding-0.6b` for 1024-dimensional embeddings.
 - **D1:** source passages, original chunk hashes, line ranges and the active index generation.
 - **Vectorize:** cosine search, isolated by index-generation namespace.
 - **Wrangler:** infrastructure bindings, migrations, secrets and deployment. The configuration and repeatable resource setup live in `infra/`.

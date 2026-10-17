@@ -29,6 +29,10 @@ function fixture() {
         calls.push({ model, input });
         if (state.fail) throw new Error("sensitive provider payload must never escape");
         if (model === EMBEDDING_MODEL) return { data: [[1, ...Array(1023).fill(0)]] };
+        // Only this selected generation model is verified against Cloudflare's JSON Mode list.
+        assert.equal(model, "@cf/meta/llama-3.3-70b-instruct-fp8-fast");
+        assert.ok(isObject(input.response_format));
+        assert.equal(input.response_format.type, "json_schema");
         return { response: JSON.stringify(state.reply) };
       },
     },
