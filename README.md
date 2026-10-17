@@ -1,10 +1,14 @@
-# Small RAG
+# Cloudflare RAG
 
-A source-grounded Markdown chatbot hosted on **Cloudflare Workers, Workers AI, D1 and Vectorize**, using **Cloudflare’s own service quotas**, without a manual daily question counter. The API, inference and storage run on Cloudflare; local Node.js tools prepare and publish the Markdown corpus.
+An evolving, fully TypeScript retrieval-augmented generation (RAG) API designed for Cloudflare’s free tier. It provides source-grounded Markdown chat on **Cloudflare Workers, Workers AI, D1 and Vectorize**, using **Cloudflare’s own service quotas**, without a manual daily question counter. The API, inference and storage run on Cloudflare; local Node.js tools prepare and publish the Markdown corpus.
 
 The deployment uses free-tier-eligible products. **There is no guaranteed daily answer count or application spending cap.** AI input/output length, indexing, other applications sharing the account, and platform limits determine when a free allocation is exhausted. Stay on Workers Free, do not enable prepaid AI Gateway billing, and review the [free-tier limits](docs/deployment.md#free-tier-boundaries). This project never automatically upgrades a plan or retries through a paid provider.
 
 The intended use is a portfolio guide: answer visitors’ questions about the owner’s background, projects, technology choices and implementation details, using a reviewed corpus. The included example documents are smoke-test fixtures, not that personal corpus.
+
+## Project direction
+
+Cloudflare RAG is evolving toward better document retrieval and more accurate, source-grounded answers. Retrieval quality, citation relevance and evaluation on representative questions guide future improvements. The features below describe the current implementation.
 
 ## Architecture
 

@@ -1,6 +1,6 @@
 # TypeScript development
 
-Small RAG follows the pnpm workspace and boundary-schema conventions of [WebApp Template](https://github.com/Westerbay/WebApp-Template), adapted to a single Cloudflare API. Node.js 24 and pnpm 12 are the only language/toolchain requirements.
+Cloudflare RAG follows the pnpm workspace and boundary-schema conventions of [WebApp Template](https://github.com/Westerbay/WebApp-Template), adapted to a single Cloudflare API. Node.js 24 and pnpm 12 are the only language/toolchain requirements.
 
 ```sh
 pnpm install --frozen-lockfile
