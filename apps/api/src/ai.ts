@@ -4,7 +4,7 @@ import type { Evidence, ChatInput } from "@small-rag/contracts/chat";
 import type { AIBinding } from "./bindings.ts";
 import { CHAT_MODEL, EMBEDDING_MODEL, MAX_OUTPUT_TOKENS } from "@small-rag/contracts/config";
 
-const RETRIEVAL_HISTORY_CHARS_PER_TURN = 200;
+const RETRIEVAL_CONTEXT_CHARS_PER_TURN = 200;
 
 export function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -15,13 +15,18 @@ export function embeddingFromResponse(value: unknown): number[] {
 }
 
 export async function embedQuery(ai: AIBinding, input: ChatInput): Promise<number[]> {
-  // History resolves references for retrieval only; generation still requires indexed evidence.
-  const recentContext = input.history.slice(-2).map(turn => ({
-    role: turn.role, content: turn.content.slice(0, RETRIEVAL_HISTORY_CHARS_PER_TURN),
-  }));
+  // Prior questions retain follow-up subjects; generation still requires indexed evidence.
+  const previousQuestions = input.history.filter(turn => turn.role === "user").slice(-2)
+    .map(turn => turn.content.slice(0, RETRIEVAL_CONTEXT_CHARS_PER_TURN));
   let query = input.message;
-  if (recentContext.length > 0) {
-    query = JSON.stringify({ question: input.message, recent_context: recentContext });
+  if (previousQuestions.length === 1) {
+    query = `Previous question (reference context only): ${previousQuestions[0]}\nCurrent question: ${input.message}`;
+  } else if (previousQuestions.length === 2) {
+    query = `Previous questions (reference context only):\n${previousQuestions.join("\n")}\nCurrent question: ${input.message}`;
+  } else if (input.history.length === 1 && input.history[0].role === "assistant") {
+    // A lone opening message may establish the subject before the visitor's first question.
+    const openingMessage = input.history[0].content.slice(0, RETRIEVAL_CONTEXT_CHARS_PER_TURN);
+    query = `Previous assistant message (reference context only): ${openingMessage}\nCurrent question: ${input.message}`;
   }
   // Qwen's `text` input aliases documents, which omits query-task conditioning.
   return embeddingFromResponse(await ai.run(EMBEDDING_MODEL, {

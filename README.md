@@ -83,7 +83,7 @@ pnpm corpus:index --corpus data/corpus --apply
 
 Only `.md` and `.markdown` files are read. The operator profile allows up to 100 files and 1000 chunks. It sends passages to Workers AI for embedding and stores them in D1; queries and selected passages are also processed by Cloudflare. There is no public ingestion endpoint. Unchanged corpora are detected before new embeddings are requested. Indexing stages a new generation and waits for the Vectorize mutation before activating it in D1. Run only one indexing job per index at a time.
 
-Document embeddings include the source path and heading ancestry so sections retain their subject. Chat uses Qwen's query mode and the latest two history messages for follow-up context, with no extra rewriting call. Only indexed passages can support factual answers.
+Document embeddings include the source path and heading ancestry so sections retain their subject. Chat uses Qwen's query mode and up to the latest two prior user questions, limited to 200 characters each, for follow-up context. If history contains only one assistant message, that bounded opening message supplies context instead; later assistant answers are excluded from search. There is no extra rewriting call. Only indexed passages can support factual answers.
 
 Edit `prompts/system.md` for the mission and JSON contract and `prompts/SOUL.md` for style, then rebuild/deploy. Prompt edits do not require reindexing. Switching the embedding model, embedding-input representation or extraction/chunking recipe requires re-exporting and reindexing; existing vectors are not mixed with a different embedding model. See [updates and recovery](docs/deployment.md#updates-and-recovery) for the contextual-retrieval rollout.
 

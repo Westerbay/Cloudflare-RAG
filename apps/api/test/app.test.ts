@@ -88,24 +88,24 @@ test("French questions use Qwen query mode rather than its document alias", asyn
   } finally { db.sqlite.close(); }
 });
 
-test("follow-up retrieval carries only recent conversation context and never promotes it to evidence", async () => {
+test("second follow-up retrieval retains the named subject without assistant answers or fabricated evidence", async () => {
   const { db, env, state, calls } = fixture();
   const history = [
-    { role: "user", content: "Describe an unrelated old project." },
-    { role: "assistant", content: "An unrelated old answer." },
-    { role: "user", content: "Qui est Mathis Dubuisson ?" },
-    { role: "assistant", content: "Mathis is an engineer. His salary is 999999 euros." },
+    { role: "user", content: "Parle-moi d’Eyefox Puzzle." },
+    { role: "assistant", content: "The developer's salary is 999999 euros." },
+    { role: "user", content: "Comment on gagne ?" },
+    { role: "assistant", content: "A fabricated answer about collecting points." },
   ];
   state.matches = [];
   state.reply = { status: "insufficient_context", answer: "Information absente des documents.", citations: [] };
   try {
-    const response = await handleRequest(request({ message: "Quel est son parcours ?", history }), env, PROMPT, NOW);
+    const response = await handleRequest(request({ message: "Qui l’a créé ?", history }), env, PROMPT, NOW);
     assert.equal(response.status, 200);
     const queries = calls[0].input.queries;
     assert.ok(Array.isArray(queries) && typeof queries[0] === "string");
-    assert.match(queries[0], /Quel est son parcours/);
-    assert.match(queries[0], /Mathis Dubuisson/);
-    assert.equal(queries[0].includes("unrelated old"), false);
+    assert.equal(queries[0], "Previous questions (reference context only):\nParle-moi d’Eyefox Puzzle.\nComment on gagne ?\nCurrent question: Qui l’a créé ?");
+    assert.equal(queries[0].includes("salary"), false);
+    assert.equal(queries[0].includes("collecting points"), false);
     const messages = calls[1].input.messages;
     assert.ok(Array.isArray(messages) && isObject(messages[1]));
     const payload = JSON.parse(String(messages[1].content));
@@ -116,24 +116,55 @@ test("follow-up retrieval carries only recent conversation context and never pro
   } finally { db.sqlite.close(); }
 });
 
-test("long prior answers are bounded in search while the current question and generation history stay intact", async () => {
+test("only the latest two user questions are bounded while the current question and generation history stay intact", async () => {
   const { db, env, calls } = fixture();
   const message = "Comment se joue Eyefox Puzzle ? " + "?".repeat(1400);
   const history = [
+    { role: "user", content: "An older unrelated question." },
     { role: "user", content: "Quel est son parcours ? " + "u".repeat(400) },
-    { role: "assistant", content: "His previous experience: " + "a".repeat(1400) },
+    { role: "assistant", content: "His previous experience: " + "a".repeat(800) },
+    { role: "user", content: "Et sa formation ? " + "v".repeat(400) },
   ];
   try {
     const response = await handleRequest(request({ message, history }), env, PROMPT, NOW);
     assert.equal(response.status, 200);
     const queries = calls[0].input.queries;
     assert.ok(Array.isArray(queries) && typeof queries[0] === "string");
-    const retrieval = JSON.parse(queries[0]);
-    assert.equal(retrieval.question, message);
-    assert.deepEqual(retrieval.recent_context.map((turn: { content: string }) => turn.content.length), [200, 200]);
+    assert.equal(queries[0], `Previous questions (reference context only):\n${history[1].content.slice(0, 200)}\n${history[3].content.slice(0, 200)}\nCurrent question: ${message}`);
+    assert.equal(queries[0].includes("older unrelated"), false);
+    assert.equal(queries[0].includes("His previous experience"), false);
     const messages = calls[1].input.messages;
     assert.ok(Array.isArray(messages) && isObject(messages[1]));
     assert.deepEqual(JSON.parse(String(messages[1].content)).history, history);
+  } finally { db.sqlite.close(); }
+});
+
+test("one prior user question keeps the singular format and excludes surrounding assistant messages", async () => {
+  const { db, env, calls } = fixture();
+  const history = [
+    { role: "assistant", content: "An introductory greeting." },
+    { role: "user", content: "Parle-moi d’Eyefox Puzzle." },
+    { role: "assistant", content: "A previous answer that must not enter search." },
+  ];
+  try {
+    const response = await handleRequest(request({ message: "Comment on gagne ?", history }), env, PROMPT, NOW);
+    assert.equal(response.status, 200);
+    assert.deepEqual(calls[0].input.queries, ["Previous question (reference context only): Parle-moi d’Eyefox Puzzle.\nCurrent question: Comment on gagne ?"]);
+    assert.equal(calls.length, 2);
+  } finally { db.sqlite.close(); }
+});
+
+test("multiple assistant-only messages do not seed retrieval", async () => {
+  const { db, env, calls } = fixture();
+  const history = [
+    { role: "assistant", content: "An introductory greeting." },
+    { role: "assistant", content: "An older answer about an unrelated subject." },
+  ];
+  try {
+    const response = await handleRequest(request({ message: "Quel est son parcours ?", history }), env, PROMPT, NOW);
+    assert.equal(response.status, 200);
+    assert.deepEqual(calls[0].input.queries, ["Quel est son parcours ?"]);
+    assert.equal(calls.length, 2);
   } finally { db.sqlite.close(); }
 });
 
@@ -373,19 +404,21 @@ test("a temporary provider failure pauses calls briefly and resumes on the next 
   } finally { db.sqlite.close(); }
 });
 
-test("empty evidence enforces a refusal and never supplies chat history as evidence", async () => {
+test("a lone assistant greeting is bounded for retrieval but empty evidence still enforces a refusal", async () => {
   const { db, env, state, calls } = fixture();
+  const greeting = "Je suis l’assistant du portfolio de Mathis Dubuisson. " + "a".repeat(300);
   state.matches = [];
   state.reply = { status: "insufficient_context", answer: "Je ne trouve pas cette information.", citations: [] };
   try {
-    const response = await handleRequest(request({ message: "Quel est le coût du projet ?", history: [{ role: "assistant", content: "It costs 99." }] }), env, PROMPT, NOW);
+    const response = await handleRequest(request({ message: "Quel est son parcours ?", history: [{ role: "assistant", content: greeting }] }), env, PROMPT, NOW);
     assert.equal(response.status, 200);
+    assert.deepEqual(calls[0].input.queries, [`Previous assistant message (reference context only): ${greeting.slice(0, 200)}\nCurrent question: Quel est son parcours ?`]);
     const messages = calls[1].input.messages;
     assert.ok(Array.isArray(messages) && isObject(messages[1]));
     const payload = JSON.parse(String(messages[1].content));
     assert.equal(payload.required_status, "insufficient_context");
     assert.deepEqual(payload.evidence, []);
-    assert.equal(payload.history[0].content, "It costs 99.");
+    assert.equal(payload.history[0].content, greeting);
   } finally { db.sqlite.close(); }
 });
 
