@@ -1,6 +1,6 @@
 # Cloudflare architecture
 
-Small RAG is a TypeScript pnpm workspace with a Cloudflare Worker and Node.js operator tools. The application layout is inspired by [WebApp Template](https://github.com/Westerbay/WebApp-Template). Cloudflare Workers, Workers AI, D1 and Vectorize are the hosted runtime.
+Cloudflare RAG is a TypeScript pnpm workspace with a Cloudflare Worker and Node.js operator tools. The application layout is inspired by [WebApp Template](https://github.com/Westerbay/WebApp-Template). Cloudflare Workers, Workers AI, D1 and Vectorize are the hosted runtime.
 
 ## Indexing
 

@@ -1,4 +1,4 @@
-# Deploy Small RAG to Cloudflare
+# Deploy Cloudflare RAG
 
 The target is Cloudflare Workers Free, Workers AI, D1 and Vectorize. The Worker executes the API, Workers AI runs inference, and D1/Vectorize store the index. `workers.dev` supplies an HTTPS address without purchasing a domain. These instructions create remote state only when you run the explicitly marked remote commands.
 
