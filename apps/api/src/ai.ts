@@ -71,8 +71,8 @@ function modelAnswer(value: unknown): unknown {
   throw new Error("Missing generation response");
 }
 
-export async function generateAnswer(
-  ai: AIBinding, prompt: string, input: ChatInput, evidence: Evidence[], searchQuestion: string,
+export function answerGenerationInput(
+  prompt: string, input: ChatInput, evidence: Evidence[], searchQuestion: string, stream = false,
 ) {
   const refusalRequired = evidence.length === 0;
   const payload: Record<string, unknown> = {
@@ -93,12 +93,17 @@ export async function generateAnswer(
     },
     required: ["status", "answer", "citations"], additionalProperties: false,
   };
-  const value = modelAnswerSchema.parse(modelAnswer(await ai.run(CHAT_MODEL, {
+  return {
     messages: [{ role: "system", content: prompt }, { role: "user", content: JSON.stringify(payload) }],
-    response_format: { type: "json_schema", json_schema: schema },
-    max_tokens: MAX_OUTPUT_TOKENS, temperature: 0.1, stream: false,
-  })));
-  if (refusalRequired && value.status !== "insufficient_context") throw new Error("Invalid refusal status");
+    // Workers AI does not support response_format together with streaming.
+    ...(!stream ? { response_format: { type: "json_schema", json_schema: schema } } : {}),
+    max_tokens: MAX_OUTPUT_TOKENS, temperature: 0.1, stream,
+  };
+}
+
+export function validateAnswer(raw: unknown, evidence: Evidence[]) {
+  const value = modelAnswerSchema.parse(raw);
+  if (evidence.length === 0 && value.status !== "insufficient_context") throw new Error("Invalid refusal status");
   const chosen = new Map(evidence.map(item => [item.id, item]));
   const citations = [...new Set(value.citations)].map(id => {
     const item = chosen.get(id);
@@ -108,4 +113,11 @@ export async function generateAnswer(
   if ((value.status === "answered" && citations.length === 0)
       || (value.status !== "answered" && citations.length !== 0)) throw new Error("Invalid citation status");
   return { status: value.status, answer: value.answer.trim(), citations };
+}
+
+export async function generateAnswer(
+  ai: AIBinding, prompt: string, input: ChatInput, evidence: Evidence[], searchQuestion: string,
+) {
+  return validateAnswer(modelAnswer(await ai.run(CHAT_MODEL,
+    answerGenerationInput(prompt, input, evidence, searchQuestion))), evidence);
 }

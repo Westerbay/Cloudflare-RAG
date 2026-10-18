@@ -3,7 +3,8 @@ import type { Database } from "@small-rag/database/bindings";
 import type { Env } from "./bindings.ts";
 import { chatInputSchema } from "@small-rag/contracts/chat";
 import { embedQuery, generateAnswer } from "./ai.ts";
-import { ServiceAvailability, ServiceSleeping } from "./availability.ts";
+import { ServiceAvailability, ServiceSleeping, sleepingPayload } from "./availability.ts";
+import { streamAnswer } from "./answer-stream.ts";
 import {
   similarityThreshold, DIMENSIONS, EMBEDDING_MODEL, MAX_BODY_BYTES,
   MAX_EVIDENCE_CHARS, TOP_K,
@@ -136,7 +137,7 @@ export async function handleRequest(request: Request, env: Env, prompt: string, 
   }
   const services = availability;
   const bindings: Env = { ...env, AI: {
-    run: (model, input) => services.run("workers_ai", () => env.AI.run(model, input), clock),
+    run: (model, input) => services.run("workers_ai", () => env.AI.run(model, input), clock, request.signal),
   } };
   try {
     const path = new URL(request.url).pathname;
@@ -179,17 +180,16 @@ export async function handleRequest(request: Request, env: Env, prompt: string, 
     const generation = await activeGeneration(env.DB, services, clock);
     const threshold = similarityThreshold(env.MIN_SIMILARITY);
     const { evidence, searchQuestion } = await retrieve(bindings, input, generation, threshold, services, clock);
+    if (request.headers.get("Accept")?.split(",").some(type => type.trim().toLowerCase() === "text/event-stream")) {
+      return await streamAnswer(bindings.AI, prompt, input, evidence, searchQuestion,
+        services, clock, request.signal, corsHeaders);
+    }
     return json(await generateAnswer(bindings.AI, prompt, input, evidence, searchQuestion), 200, corsHeaders);
   } catch (error) {
     if (error instanceof RequestError) return json({ detail: error.message }, error.status, corsHeaders);
     if (error instanceof ServiceSleeping) {
       const pause = error.pause;
-      return json({
-        status: "sleeping", detail: "Waiting for Cloudflare service availability",
-        service: pause.service, reason: pause.reason,
-        retry_at: new Date(pause.retryAt).toISOString(),
-        ...(pause.resetAt ? { reset_at: new Date(pause.resetAt).toISOString() } : {}),
-      }, 503, { ...corsHeaders, "Retry-After": String(Math.max(1, Math.ceil((pause.retryAt - clock()) / 1000))) });
+      return json(sleepingPayload(error), 503, { ...corsHeaders, "Retry-After": String(Math.max(1, Math.ceil((pause.retryAt - clock()) / 1000))) });
     }
     // Do not expose provider payloads, credentials, questions or passages in errors/logs.
     return json({ detail: "RAG service is unavailable" }, 503, corsHeaders);
