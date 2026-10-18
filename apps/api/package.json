@@ -5,6 +5,8 @@
   "version": "0.0.0",
   "dependencies": {
     "@small-rag/contracts": "workspace:*",
-    "@small-rag/database": "workspace:*"
+    "@small-rag/database": "workspace:*",
+    "@streamparser/json": "0.0.26",
+    "eventsource-parser": "4.1.2"
   }
 }

@@ -15,6 +15,16 @@ export class ServiceSleeping extends Error {
   constructor(pause: Pause) { super("Cloudflare service is unavailable"); this.pause = pause; }
 }
 
+export function sleepingPayload(error: ServiceSleeping) {
+  const pause = error.pause;
+  return {
+    status: "sleeping", detail: "Waiting for Cloudflare service availability",
+    service: pause.service, reason: pause.reason,
+    retry_at: new Date(pause.retryAt).toISOString(),
+    ...(pause.resetAt ? { reset_at: new Date(pause.resetAt).toISOString() } : {}),
+  };
+}
+
 function dailyQuota(service: CloudflareService, error: unknown): boolean {
   // Match documented exhaustion signals, not every 429 (AI 3040 is temporary capacity).
   for (let depth = 0; depth < 4 && error instanceof Error; depth++, error = error.cause) {
@@ -34,10 +44,13 @@ export class ServiceAvailability {
     this.pause = undefined;
   }
 
-  async run<T>(service: CloudflareService, operation: () => Promise<T>, clock: () => number): Promise<T> {
+  async run<T>(service: CloudflareService, operation: () => Promise<T>, clock: () => number, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted();
     this.check(clock());
     try { return await operation(); }
     catch (error) {
+      // A visitor leaving the chat is not a provider outage.
+      if (signal?.aborted) throw error;
       if (error instanceof ServiceSleeping) throw error;
       const now = clock();
       let resetAt: number | undefined;

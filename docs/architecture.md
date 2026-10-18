@@ -30,7 +30,26 @@ Answer generation receives the original question, intact validated history and t
 
 The model receives the mission and style files bundled at deployment, with the question, history and evidence serialized as untrusted JSON. Evidence IDs are short request-local aliases (`s1`, `s2`, and so on). The Worker checks status, answer text and citation membership, then restores the original hashes, paths and line ranges in the HTTP response. Chat history is never used as evidence. No qualifying evidence forces an `insufficient_context` refusal. Other refusal statuses require no citations; answered responses require at least one selected citation.
 
-Workers AI receives a JSON schema and a 200-token output cap. Its response must still pass application validation. Invalid JSON, unknown citations, truncation, provider failure and incompatible indexes return 503. There is no automatic retry, alternative paid provider or local-model fallback. Valid citation membership proves only that a passage was supplied; it cannot prove that every factual sentence follows from that passage. Model quality and latency remain to be measured against the operator's account and real corpus.
+The default JSON response path sends Workers AI a JSON schema and a 200-token output cap. Its response must still pass application validation. Invalid JSON, unknown citations, truncation, provider failure and incompatible indexes return 503. There is no automatic retry, alternative paid provider or local-model fallback. Valid citation membership proves only that a passage was supplied; it cannot prove that every factual sentence follows from that passage. Model quality and latency remain to be measured against the operator's account and real corpus.
+
+## Streaming answers
+
+`POST /v1/chat` opts into Server-Sent Events when its `Accept` header includes `text/event-stream`. Existing callers retain the JSON response. Input validation, public/private access, allowed origins, context resolution, retrieval, generation model, 200-token budget and call count are unchanged: one embedding and one answer generation, plus the existing question-resolution call when history is present.
+
+Cloudflare [JSON Mode does not support streaming](https://developers.cloudflare.com/workers-ai/features/json-mode/). Only the streamed final generation omits `response_format`; the prompt still asks for one compact JSON object with status, answer and citations. The resolver continues to use JSON Mode. The API parses Workers AI SSE with `eventsource-parser` and incrementally extracts only the JSON `answer` string with `@streamparser/json`, both MIT packages. Provider metadata, model JSON syntax, source passages and internal errors are never forwarded. OpenAI-compatible `choices[0].delta.content` is preferred when present because Cloudflare can coerce the duplicate native `response` field into a number; native string fragments remain supported without duplicating text. Usage-only and separate stop frames are accepted, while truncation, incomplete UTF-8/JSON and a missing `[DONE]` marker fail closed. The provider stream is limited to 128 KiB, 2048 events and 16 KiB of generated JSON, in addition to the token limit.
+
+The response has `Content-Type: text/event-stream; charset=utf-8` and `Cache-Control: no-store, no-transform`. Each event is one JSON value:
+
+| Event | Data | Client behavior |
+| --- | --- | --- |
+| `delta` | `{ "delta": "text fragment" }` | Append provisional answer text. |
+| `result` | The existing `{ status, answer, citations }` response | Commit the validated final answer and conversation history. |
+| `sleeping` | The existing sleeping body, including `service`, `reason` and `retry_at` | Discard provisional text and enter the existing sleep state. |
+| `error` | `{ "code": "response" }` | Discard provisional text and report that the answer could not be completed. |
+
+Exactly one terminal event (`result`, `sleeping` or `error`) completes a connected stream. An interrupted connection has no success guarantee. Clients must treat EOF without a terminal event as failure, keep unvalidated partials out of persisted history and never interpret a `delta` as a final answer. The API validates the complete JSON with the same Zod, citation-membership and status rules as the default path before emitting `result`. Provisional text can therefore be withdrawn if final validation fails; this is a streaming UX tradeoff, not stronger grounding. The API does not retry or make another model call to repair a rejected answer.
+
+Failures before the stream starts retain existing HTTP JSON status codes and retry headers. After headers are sent, provider read errors and provider error events use the same availability policy and a terminal `sleeping` payload. Cancelling the response reader stops the upstream reader; request aborts also stop it when the runtime provides an abort signal. Intentional cancellation never pauses the service for other visitors. Provider cancellation is best effort and does not promise a billing refund for already generated tokens.
 
 ## Provider quotas and service availability
 
