@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createParser } from "eventsource-parser";
 import { handleRequest } from "../src/app.ts";
+import { isObject } from "../src/ai.ts";
 import { CHAT_MODEL, EMBEDDING_MODEL } from "@small-rag/contracts/config";
 import type { Env } from "../src/bindings.ts";
 import { SQLiteDatabase } from "./sqlite.ts";
@@ -69,6 +70,15 @@ test("SSE sends answer text before inference completes, then validates citations
     assert.equal(calls[2].input.stream, true);
     assert.equal("response_format" in calls[2].input, false);
     assert.equal(calls[2].input.max_tokens, 200);
+    const messages = calls[2].input.messages;
+    assert.ok(Array.isArray(messages) && isObject(messages[1]));
+    const payload = JSON.parse(String(messages[1].content));
+    assert.equal(payload.question, "Comment fonctionne cet assistant ?");
+    assert.equal(payload.search_question, "How does the assistant work?");
+    assert.equal("history" in payload, false);
+    assert.deepEqual(payload.evidence.map((item: { text: string }) => item.text), [
+      "Workers runs the API and D1 stores evidence.",
+    ]);
     assert.ok(response.body && upstream);
     const reader = response.body.getReader();
     upstream.enqueue(encoder.encode(event('{"status":"answered","answer":"Il utilise D1')));

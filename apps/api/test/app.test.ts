@@ -96,7 +96,7 @@ test("French questions use Qwen query mode rather than its document alias", asyn
   } finally { db.sqlite.close(); }
 });
 
-test("resolved search intent reaches generation as untrusted context alongside the original question and indexed evidence", async () => {
+test("only resolved search intent reaches generation while raw history stays in reference resolution", async () => {
   const cases = [
     {
       message: "Il a fait quoi à son dernier poste ? C’est quoi ses missions ?",
@@ -134,6 +134,14 @@ test("resolved search intent reaches generation as untrusted context alongside t
       ],
       question: "Who created Eyefox Puzzle?",
     },
+    {
+      message: "Peux-tu confirmer ce chiffre et ce rôle ?",
+      history: [
+        { role: "user", content: "Parle-moi de sa plateforme e-commerce." },
+        { role: "assistant", content: "Mathis était directeur technique et a économisé exactement 80 % des coûts AWS." },
+      ],
+      question: "Does the evidence confirm that Mathis was CTO and saved exactly 80% of AWS costs on the e-commerce project?",
+    },
   ];
   for (const { message, history, question } of cases) {
     const { db, env, state, calls } = fixture();
@@ -155,8 +163,9 @@ test("resolved search intent reaches generation as untrusted context alongside t
       const payload = JSON.parse(String(messages[1].content));
       assert.equal(payload.question, message);
       assert.equal(payload.search_question, question);
-      assert.deepEqual(payload.history, history);
-      assert.deepEqual(Object.keys(payload).sort(), ["evidence", "history", "question", "search_question"]);
+      assert.equal("history" in payload, false);
+      assert.deepEqual(Object.keys(payload).sort(), ["evidence", "question", "search_question"]);
+      for (const turn of history) assert.equal(String(messages[1].content).includes(turn.content), false);
       assert.deepEqual(payload.evidence.map((item: { text: string }) => item.text), [
         "D1 stores source passages.", "Workers runs the API.",
       ]);
@@ -181,7 +190,8 @@ test("resolution receives the full validated question and history without arbitr
       assert.ok(Array.isArray(messages) && isObject(messages[1]));
       const payload = JSON.parse(String(messages[1].content));
       assert.equal(payload.question, message);
-      assert.deepEqual(payload.history, history);
+      if (index === 0) assert.deepEqual(payload.history, history);
+      else assert.equal("history" in payload, false);
     }
   } finally { db.sqlite.close(); }
 });
@@ -485,7 +495,7 @@ test("a greeting can resolve a search subject but the rewrite and history never 
     assert.equal(payload.search_question, "What is Mathis Dubuisson's background?");
     assert.equal(payload.required_status, "insufficient_context");
     assert.deepEqual(payload.evidence, []);
-    assert.equal(payload.history[0].content, greeting);
+    assert.equal("history" in payload, false);
     assert.equal(calls.length, 3);
   } finally { db.sqlite.close(); }
 });
