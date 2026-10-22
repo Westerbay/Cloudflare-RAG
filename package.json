@@ -5,7 +5,7 @@
   "description": "A source-grounded Markdown chatbot on Cloudflare Workers AI, D1 and Vectorize",
   "type": "module",
   "engines": {
-    "node": ">=24 <25",
+    "node": ">=24.22.1 <25",
     "pnpm": ">=12"
   },
   "scripts": {
