@@ -1,6 +1,6 @@
 # TypeScript development
 
-Cloudflare RAG follows the pnpm workspace and boundary-schema conventions of [WebApp Template](https://github.com/Westerbay/WebApp-Template), adapted to a single Cloudflare API. Node.js 24 and pnpm 12 are the only language/toolchain requirements.
+Cloudflare RAG follows the pnpm workspace and boundary-schema conventions of [WebApp Template](https://github.com/Westerbay/WebApp-Template), adapted to a single Cloudflare API. Node.js 24.22.1 or newer within 24.x and pnpm 12 are the language/toolchain requirements. This minimum includes the [October 2026 Node.js security fixes](https://nodejs.org/en/blog/release/v24.22.1/), and pnpm enforces it during installation. With nvm, run `nvm install` and `nvm use` from the repository root before the commands below; `.nvmrc` selects the patched version.
 
 ```sh
 pnpm install --frozen-lockfile

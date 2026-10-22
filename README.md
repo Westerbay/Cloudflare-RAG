@@ -25,7 +25,7 @@ The [architecture guide](docs/architecture.md) describes indexing, grounding and
 
 ## Install and validate locally
 
-Use Node.js 24 and pnpm 12. From the repository root:
+Use Node.js **24.22.1 or newer within 24.x** and pnpm 12. Node.js 24.22.1 includes the [October 2026 security fixes](https://nodejs.org/en/blog/release/v24.22.1/); pnpm rejects unsupported Node versions during installation. If you use nvm, run `nvm install` and `nvm use` from the repository root to select the version in `.nvmrc`. Then run:
 
 ```sh
 pnpm install --frozen-lockfile

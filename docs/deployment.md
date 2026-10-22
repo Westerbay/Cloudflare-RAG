@@ -4,7 +4,7 @@ The target is Cloudflare Workers Free, Workers AI, D1 and Vectorize. The Worker 
 
 ## Prerequisites
 
-Use Node.js 24 and pnpm 12 for the API, tooling and offline corpus preparation. Install the locked workspace dependencies:
+Use Node.js 24.22.1 or newer within 24.x and pnpm 12 for local tests, builds, deployment tooling and offline corpus preparation. With nvm, run `nvm install` and `nvm use` from the repository root; pnpm rejects unsupported Node versions during installation. The deployed API runs on Cloudflare Workers, whose runtime is managed by Cloudflare. Updating local Node.js does not update that runtime or require corpus reindexing. Install the locked workspace dependencies:
 
 ```sh
 pnpm install --frozen-lockfile
